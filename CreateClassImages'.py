@@ -21,7 +21,7 @@ AllAnno = pd.concat([annot_train, annot_val], axis=0)
 AllAnno = AllAnno[AllAnno['LowFreqHz'] < 4000]
 
 AllAnno = AllAnno.dropna(subset=['FileEndSec'])
-AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
+#AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
 
 
 
@@ -183,53 +183,13 @@ def create_hdf5_dataset(annotations, hdf5_filename):
             dataset.create_dataset(f'{ii}/label', data=label)
             print(ii, ' of ', len(annotations))
 
-train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Mel17.h5'
-create_hdf5_dataset(annotations=AllAnno.iloc[0:5000], hdf5_filename= train_hdf5_file)
+train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
+create_hdf5_dataset(annotations=AllAnno, hdf5_filename= train_hdf5_file)
 
 hf = h5py.File(train_hdf5_file, 'r')
 
 # Batch loader for HDF5 dataset
 
-class BatchLoader:
-    def __init__(self, hdf5_file, batch_size):
-        self.hf = h5py.File(hdf5_file, 'r')
-        self.batch_size = batch_size
-        self.train_keys = list(self.hf['train'].keys())
-        self.test_keys = list(self.hf['test'].keys())
-        self.num_train_samples = len(self.train_keys)
-        self.num_test_samples = len(self.test_keys)
-
-    def get_train_batch(self):
-        batch_data = []
-        batch_labels = []
-
-        train_indices = random.sample(range(self.num_train_samples), self.batch_size)
-        for index in train_indices:
-            key = self.train_keys[index]
-            spec = self.hf['train'][key]['spectrogram'][:]
-            label = self.hf['train'][key]['label'][()]  # Access scalar value
-            batch_data.append(spec)
-            batch_labels.append(label)
-
-        return np.array(batch_data), np.array(batch_labels)
-
-    def get_test_batch(self):
-        batch_data = []
-        batch_labels = []
-
-        test_indices = random.sample(range(self.num_test_samples), self.batch_size)
-        for index in test_indices:
-            key = self.test_keys[index]
-            spec = self.hf['test'][key]['spectrogram'][:]
-            label = self.hf['test'][key]['label'][()]  # Access scalar value
-            batch_data.append(spec)
-            batch_labels.append(label)
-
-        return np.array(batch_data), np.array(batch_labels)
-# Example usage
-batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
-train_data, train_labels = batch_loader.get_train_batch()
-test_data, test_labels = batch_loader.get_test_batch()
 
     def __init__(self, hdf5_file, batch_size):
         self.hf = h5py.File(hdf5_file, 'r')
@@ -281,6 +241,7 @@ from keras.layers import Dense, Conv2D, Flatten, MaxPooling2D
 from keras.layers import Input
 from keras import Model
 from tqdm import tqdm
+import random
 # Define CNN model
 
 def create_model(input_shape, num_classes):
@@ -413,10 +374,12 @@ def train_model(model, batch_loader, epochs, num_classes):
         print(f"Epoch {epoch + 1}/{epochs}: "
               f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, "
               f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
+        
+        
+
 
 # Initialize batch loader
-batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
-
+batch_loader = BatchLoader(train_hdf5_file, batch_size=120)
 
 
 # Get input shape and number of classes
@@ -429,7 +392,15 @@ model = create_model(input_shape_with_channels, num_classes)
 model = compile_model(model)
 
 # Train model
-train_model(model, batch_loader, epochs=5, num_classes=num_classes)
+train_model(model, batch_loader, epochs=2, num_classes=num_classes)
+
+
+
+# Evaluate model
+batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
+test_data, test_labels = batch_loader.get_test_batch()
+accuracy = model.evaluate(test_data, test_labels)[1]
+print("Test Accuracy:", accuracy)
 
 
 

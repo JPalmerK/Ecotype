@@ -18,7 +18,7 @@ import random
 import h5py
 
 
-train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Mel17.h5'
+train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
 
 class BatchLoader:
     def __init__(self, hdf5_file, batch_size):
@@ -196,7 +196,7 @@ def train_model(model, batch_loader, epochs, num_classes):
         
         
 # Initialize batch loader
-batch_loader = BatchLoader(train_hdf5_file, batch_size=60)
+batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
 
 
 # Get input shape and number of classes
@@ -204,11 +204,12 @@ input_shape = batch_loader.get_train_batch()[0].shape[1:]  # Shape of a single s
 num_classes =7
 
 # Create and compile model
+input_shape_with_channels = input_shape + (1,)  # Add channel
 model = create_model(input_shape_with_channels, num_classes)
 model = compile_model(model)
 
 # Train model
-train_model(model, batch_loader, epochs=10, num_classes=num_classes)
+train_model(model, batch_loader, epochs=3, num_classes=num_classes)
 
 
 
