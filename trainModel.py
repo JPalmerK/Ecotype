@@ -20,6 +20,8 @@ import h5py
 
 train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
 
+
+
 class BatchLoader:
     def __init__(self, hdf5_file, batch_size):
         self.hf = h5py.File(hdf5_file, 'r')
@@ -28,18 +30,32 @@ class BatchLoader:
         self.test_keys = list(self.hf['test'].keys())
         self.num_train_samples = len(self.train_keys)
         self.num_test_samples = len(self.test_keys)
+        self.train_indices = list(range(self.num_train_samples))
+        self.test_indices = list(range(self.num_test_samples))
+        random.shuffle(self.train_indices)
+        random.shuffle(self.test_indices)
+        self.current_train_index = 0
+        self.current_test_index = 0
+        self.epocBatch = np.ceil(self.num_train_samples / batch_size)
 
     def get_train_batch(self):
         batch_data = []
         batch_labels = []
 
-        train_indices = random.sample(range(self.num_train_samples), self.batch_size)
-        for index in train_indices:
+        start_index = self.current_train_index
+        end_index = min(start_index + self.batch_size, self.num_train_samples)
+        for i in range(start_index, end_index):
+            index = self.train_indices[i]
             key = self.train_keys[index]
             spec = self.hf['train'][key]['spectrogram'][:]
-            label = self.hf['train'][key]['label'][()]  # Access scalar value
+            label = self.hf['train'][key]['label'][()]
             batch_data.append(spec)
             batch_labels.append(label)
+
+        self.current_train_index = end_index % self.num_train_samples
+
+        percentage = (self.current_train_index / self.num_train_samples) * 100
+        print(f"Percentage of epoch completed for training: {percentage:.2f}%")
 
         return np.array(batch_data), np.array(batch_labels)
 
@@ -47,17 +63,27 @@ class BatchLoader:
         batch_data = []
         batch_labels = []
 
-        test_indices = random.sample(range(self.num_test_samples), self.batch_size)
-        for index in test_indices:
+        start_index = self.current_test_index
+        end_index = min(start_index + self.batch_size, self.num_test_samples)
+        for i in range(start_index, end_index):
+            index = self.test_indices[i]
             key = self.test_keys[index]
             spec = self.hf['test'][key]['spectrogram'][:]
-            label = self.hf['test'][key]['label'][()]  # Access scalar value
+            label = self.hf['test'][key]['label'][()]
             batch_data.append(spec)
             batch_labels.append(label)
 
+        self.current_test_index = end_index % self.num_test_samples
+
+        percentage = (self.current_test_index / self.num_test_samples) * 100
+        print(f"Percentage of epoch completed for testing: {percentage:.2f}%")
+
         return np.array(batch_data), np.array(batch_labels)
+
+
+
 # Example usage
-batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
+batch_loader = BatchLoader(train_hdf5_file, batch_size=1000)
 train_data, train_labels = batch_loader.get_train_batch()
 test_data, test_labels = batch_loader.get_test_batch()
 
@@ -194,9 +220,30 @@ def train_model(model, batch_loader, epochs, num_classes):
               f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, "
               f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
         
+   
         
+        
+
+
+# Train model
+def train_model(model, batch_loader, epochs, num_classes):
+    train_data, train_labels = batch_loader.get_train_batch()
+    train_data = np.expand_dims(train_data, axis=-1)  # Add channel dimension
+    train_labels = to_categorical(train_labels, num_classes=num_classes)
+    
+    test_data, test_labels = batch_loader.get_test_batch()
+    test_data = np.expand_dims(test_data, axis=-1)  # Add channel dimension
+    test_labels = to_categorical(test_labels, num_classes=num_classes)
+    
+    history = model.fit(train_data, train_labels, 
+                        batch_size=batch_loader.batch_size, 
+                        epochs=epochs,
+                        validation_data=(test_data, test_labels), verbose=1)
+    
+    return history
+
 # Initialize batch loader
-batch_loader = BatchLoader(train_hdf5_file, batch_size=32)
+batch_loader = BatchLoader(train_hdf5_file, batch_size=500)
 
 
 # Get input shape and number of classes
@@ -209,7 +256,7 @@ model = create_model(input_shape_with_channels, num_classes)
 model = compile_model(model)
 
 # Train model
-train_model(model, batch_loader, epochs=3, num_classes=num_classes)
+train_model(model, batch_loader, epochs=569, num_classes=num_classes)
 
 
 
