@@ -105,6 +105,7 @@ class BatchLoader2(keras.utils.Sequence):
 from keras.models import Sequential
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Flatten, Dense
+from keras.callbacks import EarlyStopping
 
 # Define the CNN model
 def create_model(input_shape, num_classes):
@@ -122,7 +123,16 @@ def create_model(input_shape, num_classes):
 
 # Define the training function
 def train_model(model, train_generator, val_generator, epochs):
-    model.fit(x=train_generator,
+    # Define early stopping callback
+   early_stopping = EarlyStopping(monitor='val_loss', patience=3,
+                                  restore_best_weights=True)
+   
+   # Train the model with early stopping
+   model.fit(x=train_generator,
+             epochs=epochs,
+             validation_data=val_generator,
+             callbacks=[early_stopping])
+   model.fit(x=train_generator,
               epochs=epochs,
               validation_data=val_generator)
 # Example usage:
@@ -155,6 +165,7 @@ model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/pilot_v1.keras')
 ##########################################################################
 
 from keras.models import load_model
+
 
 test_batch_loader =  BatchLoader2(train_hdf5_file, 
                            trainTest = 'test', batch_size=500,  n_classes=7)
@@ -254,12 +265,11 @@ def identity_block(input_tensor, filters):
 
 # Initialize batch loader
 
-
 train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
 train_batch_loader = BatchLoader2(train_hdf5_file, 
-                           trainTest = 'train', batch_size=150, n_classes=7)
+                           trainTest = 'train', batch_size=250, n_classes=7)
 test_batch_loader =  BatchLoader2(train_hdf5_file, 
-                           trainTest = 'test', batch_size=150,  n_classes=7)
+                           trainTest = 'test', batch_size=250,  n_classes=7)
 
 
 # Get input shape and number of classes
@@ -271,4 +281,81 @@ model = create_model_with_resnet(input_shape, num_classes)
 model = compile_model(model)
 
 # Train model
-train_model(model, train_batch_loader, test_batch_loader, epochs=1)
+train_model(model, train_batch_loader, test_batch_loader, epochs=12)
+
+model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/Resnetv1.keras')
+
+###########################################################################
+# Load and evaluate the resnet model
+##########################################################################
+
+from keras.models import load_model
+from sklearn.metrics import confusion_matrix
+
+
+test_batch_loader =  BatchLoader2(train_hdf5_file, 
+                           trainTest = 'train', batch_size=500,  n_classes=7)
+
+
+ValData  = 'C:/Users/kaity/Documents/GitHub/Ecotype/Malahat4khz_Melint16.h5'
+val_batch_loader =  BatchLoader2(ValData, 
+                           trainTest = 'train', batch_size=500,  n_classes=7)
+
+# Load the model from the saved file
+loaded_model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models/Resnetv1.keras')
+
+
+
+# Initialize lists to accumulate predictions and true labels
+y_pred_accum = []
+y_true_accum = []
+
+# Get the total number of batches
+total_batches = len(val_batch_loader)
+
+
+# Iterate over test data generator batches
+for i, (batch_data, batch_labels) in enumerate(val_batch_loader):
+    # Predict on the current batch
+    batch_pred = loaded_model.predict(batch_data)
+    
+    # Convert predictions to class labels
+    batch_pred_labels = np.argmax(batch_pred, axis=1)
+    
+    # Convert true labels to class labels
+    batch_true_labels = np.argmax(batch_labels, axis=1)
+    
+    # Accumulate predictions and true labels
+    y_pred_accum.extend(batch_pred_labels)
+    y_true_accum.extend(batch_true_labels)
+    
+    # Print progress
+    print(f'Batch {i+1}/{total_batches} processed')
+
+# Convert accumulated lists to arrays
+y_pred_accum = np.array(y_pred_accum)
+y_true_accum = np.array(y_true_accum)
+
+# Compute confusion matrix
+conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
+
+print("Confusion Matrix:")
+
+# Normalize confusion matrix
+conf_matrix_norm = conf_matrix.astype('float') / conf_matrix.sum(axis=1)[:, np.newaxis]
+
+print("Confusion Matrix (Proportions):")
+print(conf_matrix_norm)
+
+
+
+
+annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
+annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
+AllAnno = pd.concat([annot_train, annot_val], axis=0)
+AllAnno = AllAnno[AllAnno['LowFreqHz'] < 4000]
+
+AllAnno = AllAnno.dropna(subset=['FileEndSec'])
+#AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
+
+label_mapping = AllAnno[['label', 'Labels']].drop_duplicates()
