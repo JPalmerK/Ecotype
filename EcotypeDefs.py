@@ -25,10 +25,15 @@ import h5py
 from keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Add, Activation
 from keras.models import load_model
 from sklearn.metrics import confusion_matrix
+import keras
+from keras import Model
+from keras.callbacks import EarlyStopping
+
+
 
 
 def load_and_process_audio_segment(file_path, start_time, end_time,
-                                      clipDur=2, outSR=16000):
+                                   clipDur=2, outSR=16000):
     """
     Load an audio segment from a file, process it as described, and create a spectrogram image.
     
@@ -41,31 +46,33 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     
     Returns:
         spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
+        SNR (float): Signal-to-Noise Ratio of the spectrogram.
     """
     # Get the duration of the audio file
-    file_duration = librosa.get_duration(filename=file_path)
+    file_duration = librosa.get_duration(path=file_path)
     
     # Calculate the duration of the audio segment
     duration = end_time - start_time
     
-    # Adjust start and end times if the duration is less than clipDur
-    if duration < clipDur:
-        # Calculate the amount of time to add/subtract from start/end times
-        time_difference = clipDur - duration
-        time_to_add = time_difference / 2
-        time_to_subtract = time_difference - time_to_add
-        
-        # Adjust start and end times
-        start_time = max(0, start_time - time_to_subtract)
-        end_time = min(end_time + time_to_add, file_duration)
-        #warnings.warn(f"Adjusted start time to {start_time} and end time to {end_time} to ensure spectrogram size consistency.")
+    # Calculate the center time of the desired clip
+    center_time = (start_time + end_time) / 2.0
+    
+    # Calculate new start and end times based on the center and clip duration
+    new_start_time = center_time - clipDur / 2
+    new_end_time = center_time + clipDur / 2
+    
+    # Adjust start and end times if the clip duration is less than desired
+    if new_end_time - new_start_time < clipDur:
+        pad_length = clipDur - (new_end_time - new_start_time)
+        new_start_time = max(0, new_start_time - pad_length / 2.0)
+        new_end_time = min(file_duration, new_end_time + pad_length / 2.0)
     
     # Ensure start and end times don't exceed the bounds of the audio file
-    start_time = max(0, min(start_time, file_duration - clipDur))
-    end_time = max(clipDur, min(end_time, file_duration))
+    new_start_time = max(0, min(new_start_time, file_duration - clipDur))
+    new_end_time = max(clipDur, min(new_end_time, file_duration))
     
     # Load audio segment
-    audio_data, sample_rate = librosa.load(file_path, sr=outSR, offset=start_time, duration=clipDur)
+    audio_data, sample_rate = librosa.load(file_path, sr=outSR, offset=new_start_time, duration=clipDur)
     
     # Create spectrogram
     n_fft = 512
@@ -75,17 +82,130 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
                                           sr=outSR,
                                           n_fft=n_fft,
                                           hop_length=hop_length)
-    spec = librosa.power_to_db(spec, ref=np.max)
+    spec_db = librosa.power_to_db(spec, ref=np.max)
     
     # Normalize spectrogram
-    row_medians = np.median(spec, axis=1, keepdims=True)
-    col_medians = np.median(spec, axis=0, keepdims=True)
-    spec_normalized = spec - row_medians - col_medians
+    row_medians = np.median(spec_db, axis=1, keepdims=True)
+    col_medians = np.median(spec_db, axis=0, keepdims=True)
+    spec_normalized = spec_db - row_medians - col_medians
     
-    return spec_normalized
+    # Calculate SNR using 25th and 85th percentiles
+    signal_level = np.percentile(spec_normalized, 85)
+    noise_level = np.percentile(spec_normalized, 25)
+    SNR = signal_level - noise_level
+    
+    return spec_normalized, float(SNR)
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
 def create_hdf5_dataset(annotations, hdf5_filename):
+    with h5py.File(hdf5_filename, 'w') as hf:
+        train_group = hf.create_group('train')
+        test_group = hf.create_group('test')
+
+        n_rows = len(annotations)
+        # Read CSV file and process data
+        # Replace this with your code to iterate through the CSV file and generate spectrogram clips
+        #for index, row in AllAnno.iterrows():
+        for ii in range(0, n_rows):
+            row = annotations.iloc[ii]
+            file_path = row['FilePath']
+            start_time = row['FileBeginSec']
+            end_time = row['FileEndSec']
+            label = row['label']
+            traintest = row['traintest']
+            dep = row['Dep']
+            provider = row['Provider']
+            kw = row['KW']
+            kwCertin = row['KW_certain']
+
+            spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time)
+
+            if traintest == 'Train':  # 80% train, 20% test
+                dataset = train_group
+            else:
+                dataset = test_group
+
+            dataset.create_dataset(f'{ii}/spectrogram', data=spec)
+            dataset.create_dataset(f'{ii}/label', data=label)
+            dataset.create_dataset(f'{ii}/deployment', data=dep)
+            dataset.create_dataset(f'{ii}/provider', data=provider)
+            dataset.create_dataset(f'{ii}/KW', data=kw)
+            dataset.create_dataset(f'{ii}/KW_certain', data=kwCertin)
+            dataset.create_dataset(f'{ii}/SNR', data=SNR)
+            
+            
+            print(ii, ' of ', len(annotations))
+
+
+
+
+import h5py
+import librosa
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Define your functions load_and_process_audio_segment() and create_hdf5_dataset() here
+
+# Function to process each row in annotations DataFrame
+def process_row(row):
+    file_path = row['FilePath']
+    start_time = row['FileBeginSec']
+    end_time = row['FileEndSec']
+    label = row['label']
+    traintest = row['traintest']
+    dep = row['Dep']
+    provider = row['Provider']
+    kw = row['KW']
+    kwCertin = row['KW_certain']
+
+    spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time)
+
+    return spec, SNR, traintest, label, dep, provider, kw, kwCertin
+
+# Main function to create HDF5 dataset with multithreading
+def create_hdf5_dataset_parallel(annotations, hdf5_filename, num_threads=4):
+    with h5py.File(hdf5_filename, 'w') as hf:
+        train_group = hf.create_group('train')
+        test_group = hf.create_group('test')
+
+        n_rows = len(annotations)
+
+        # Use ThreadPoolExecutor to parallelize the processing
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(process_row, annotations.iloc[ii]) for ii in range(n_rows)]
+
+            for future in as_completed(futures):
+                spec, SNR, traintest, label, dep, provider, kw, kwCertin = future.result()
+
+                if traintest == 'Train':  # 80% train, 20% test
+                    dataset = train_group
+                else:
+                    dataset = test_group
+
+                ii = len(dataset)  # Get the index for the new dataset
+
+                dataset.create_dataset(f'{ii}/spectrogram', data=spec)
+                dataset.create_dataset(f'{ii}/label', data=label)
+                dataset.create_dataset(f'{ii}/deployment', data=dep)
+                dataset.create_dataset(f'{ii}/provider', data=provider)
+                dataset.create_dataset(f'{ii}/KW', data=kw)
+                dataset.create_dataset(f'{ii}/KW_certain', data=kwCertin)
+                dataset.create_dataset(f'{ii}/SNR', data=SNR)
+
+                print(ii, ' of ', len(annotations))
+
+
+
+def check_spectrogram_dimensions(hdf5_file):
+    with h5py.File(hdf5_file, 'r') as hf:
+        spectrogram_shapes = set()  # Set to store unique spectrogram shapes
+        for group_name in hf:
+            group = hf[group_name]
+            for key in group:
+                spectrograms = group[key]['spectrogram'][:]
+                for spectrogram in spectrograms:
+                    spectrogram_shapes.add(spectrogram.shape)
+    return spectrogram_shapes
     with h5py.File(hdf5_filename, 'w') as hf:
         train_group = hf.create_group('train')
         test_group = hf.create_group('test')
@@ -165,20 +285,16 @@ class BatchLoader2(keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
 
-# Define the training function that works with the batch generagor
+
 def train_model(model, train_generator, val_generator, epochs):
     # Define early stopping callback
-   early_stopping = EarlyStopping(monitor='val_loss', patience=3,
-                                  restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
    
-   # Train the model with early stopping
-   model.fit(x=train_generator,
-             epochs=epochs,
-             validation_data=val_generator,
-             callbacks=[early_stopping])
-   model.fit(x=train_generator,
+    # Train the model with early stopping
+    model.fit(x=train_generator,  # Here, `train_generator` should be a generator object
               epochs=epochs,
-              validation_data=val_generator)
+              validation_data=val_generator,
+              callbacks=[early_stopping])
 
 def check_spectrogram_dimensions(hdf5_file):
     with h5py.File(hdf5_file, 'r') as hf:
@@ -223,16 +339,42 @@ def identity_block(input_tensor, filters):
 
 
 
+def create_det_class_model_with_resnet(input_shape, num_classes_ecotype):
+    input_layer = Input(shape=input_shape)
+    x = Conv2D(32, kernel_size=(3, 3), activation='relu')(input_layer)
+    x = MaxPooling2D(pool_size=(2, 2))(x)
+    x = Conv2D(64, kernel_size=(3, 3), activation='relu')(x)
+    x = MaxPooling2D(pool_size=(2, 2))(x)
+    
+    # Add three identity blocks
+    x = identity_block(x, 64)
+    x = identity_block(x, 64)
+    x = identity_block(x, 64)
+    
+    x = Flatten()(x)
+    x = Dense(128, activation='relu')(x)
+    
+    # Output branch for killer whale detection
+    output_killer_whale = Dense(1, activation='sigmoid', name='killer_whale')(x)
+    
+    # Output branch for ecotype classification
+    output_ecotype = Dense(num_classes_ecotype, activation='softmax', name='ecotype')(x)
+    
+    model = Model(inputs=input_layer, outputs=[output_killer_whale, output_ecotype])
+    
+    return model
 
-ValData  = 'C:/Users/kaity/Documents/GitHub/Ecotype/Malahat4khz_Melint16.h5'
-val_batch_loader =  BatchLoader2(ValData, 
-                           trainTest = 'train', batch_size=500,  n_classes=7)
 
-# Load the model from the saved file
-loaded_model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models/Resnetv1.keras')
+def compile_det_class_model(model):
+    model.compile(optimizer='adam',
+                  loss={'killer_whale': 'binary_crossentropy', 'ecotype': 'categorical_crossentropy'},
+                  metrics={'killer_whale': 'accuracy', 'ecotype': 'accuracy'})
+    return model
 
-
-
+# Compile model
+def compile_model(model):
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
 
 def batch_conf_matrix(loaded_model, val_batch_loader):
     # Initialize lists to accumulate predictions and true labels
@@ -270,28 +412,6 @@ def batch_conf_matrix(loaded_model, val_batch_loader):
     print("Confusion Matrix:")
 
 
-
-
-if __name__ == "__main__":
-    
-    
-    
-annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
-annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
-
-AllAnno = pd.concat([annot_train, annot_val], axis=0)
-AllAnno = AllAnno[AllAnno['LowFreqHz'] < 4000]
-AllAnno = AllAnno.dropna(subset=['FileEndSec'])
-
-
-#AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
-annot_malahat = pd.read_csv('C:/Users/kaity/Documents/GitHub/Ecotype/Malahat.csv')
-Validation =annot_malahat[annot_malahat['LowFreqHz'] < 4000]
-
-
-
-label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
-label_mapping_Validation = Validation[['label', 'Labels']].drop_duplicates()
 
 
 

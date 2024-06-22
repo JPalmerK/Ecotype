@@ -15,24 +15,6 @@ import pandas as pd
 import h5py
 
 
-annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
-annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
-
-AllAnno = pd.concat([annot_train, annot_val], axis=0)
-AllAnno = AllAnno[AllAnno['LowFreqHz'] < 4000]
-AllAnno = AllAnno.dropna(subset=['FileEndSec'])
-
-
-#AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
-annot_malahat = pd.read_csv('C:/Users/kaity/Documents/GitHub/Ecotype/Malahat.csv')
-Validation =annot_malahat[annot_malahat['LowFreqHz'] < 4000]
-
-
-
-
-label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
-
-label_mapping_Validation = Validation[['label', 'Labels']].drop_duplicates()
 
 
 ################# NO TOUCHIE##################################
@@ -123,10 +105,13 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
         spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
     """
     # Get the duration of the audio file
-    file_duration = librosa.get_duration(filename=file_path)
+    file_duration = librosa.get_duration(path=file_path)
     
     # Calculate the duration of the audio segment
     duration = end_time - start_time
+    
+    # Center time
+    center_time = start_time+ duration/2
     
     # Adjust start and end times if the duration is less than clipDur
     if duration < clipDur:
@@ -162,7 +147,78 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     col_medians = np.median(spec, axis=0, keepdims=True)
     spec_normalized = spec - row_medians - col_medians
     
-    return spec_normalized
+    # Get SNR using 25th and 85th percentiles
+    sig = np.quantile(spec_normalized, np.array([0.85]))
+    noise = np.quantile(spec_normalized, np.array([0.25]))
+    SNR = np.round(sig-noise,1)
+    
+    return spec_normalized, SNR
+
+
+
+def load_and_process_audio_segment(file_path, start_time, end_time,
+                                   clipDur=2, outSR=16000):
+    """
+    Load an audio segment from a file, process it as described, and create a spectrogram image.
+    
+    Parameters:
+        file_path (str): Path to the audio file.
+        start_time (float): Start time of the audio segment in seconds.
+        end_time (float): End time of the audio segment in seconds.
+        clipDur (float): Duration of the desired spectrogram in seconds.
+        outSR (int): Target sample rate for resampling.
+    
+    Returns:
+        spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
+        SNR (float): Signal-to-Noise Ratio of the spectrogram.
+    """
+    # Get the duration of the audio file
+    file_duration = librosa.get_duration(path=file_path)
+    
+    # Calculate the duration of the audio segment
+    duration = end_time - start_time
+    
+    # Calculate the center time of the desired clip
+    center_time = (start_time + end_time) / 2.0
+    
+    # Calculate new start and end times based on the center and clip duration
+    new_start_time = center_time - clipDur / 2
+    new_end_time = center_time + clipDur / 2
+    
+    # Adjust start and end times if the clip duration is less than desired
+    if new_end_time - new_start_time < clipDur:
+        pad_length = clipDur - (new_end_time - new_start_time)
+        new_start_time = max(0, new_start_time - pad_length / 2.0)
+        new_end_time = min(file_duration, new_end_time + pad_length / 2.0)
+    
+    # Ensure start and end times don't exceed the bounds of the audio file
+    new_start_time = max(0, min(new_start_time, file_duration - clipDur))
+    new_end_time = max(clipDur, min(new_end_time, file_duration))
+    
+    # Load audio segment
+    audio_data, sample_rate = librosa.load(file_path, sr=outSR, offset=new_start_time, duration=clipDur)
+    
+    # Create spectrogram
+    n_fft = 512
+    hop_length = int(n_fft * 0.2)  # 90% overlap
+    
+    spec = librosa.feature.melspectrogram(y=audio_data,
+                                          sr=outSR,
+                                          n_fft=n_fft,
+                                          hop_length=hop_length)
+    spec_db = librosa.power_to_db(spec, ref=np.max)
+    
+    # Normalize spectrogram
+    row_medians = np.median(spec_db, axis=1, keepdims=True)
+    col_medians = np.median(spec_db, axis=0, keepdims=True)
+    spec_normalized = spec_db - row_medians - col_medians
+    
+    # Calculate SNR using 25th and 85th percentiles
+    signal_level = np.percentile(spec_normalized, 85)
+    noise_level = np.percentile(spec_normalized, 25)
+    SNR = signal_level - noise_level
+    
+    return spec_normalized, float(SNR)
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
 def create_hdf5_dataset(annotations, hdf5_filename):
@@ -186,7 +242,7 @@ def create_hdf5_dataset(annotations, hdf5_filename):
             kw = row['KW']
             kwCertin = row['KW_certain']
 
-            spec = load_and_process_audio_segment(file_path, start_time, end_time)
+            spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time)
 
             if traintest == 'Train':  # 80% train, 20% test
                 dataset = train_group
@@ -199,14 +255,11 @@ def create_hdf5_dataset(annotations, hdf5_filename):
             dataset.create_dataset(f'{ii}/provider', data=provider)
             dataset.create_dataset(f'{ii}/KW', data=kw)
             dataset.create_dataset(f'{ii}/KW_certain', data=kwCertin)
+            dataset.create_dataset(f'{ii}/SNR', data=SNR)
             
             
             print(ii, ' of ', len(annotations))
 
-train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/Malahat4khz_Melint16.h5'
-create_hdf5_dataset(annotations=Validation, hdf5_filename= train_hdf5_file)
-
-hf = h5py.File(train_hdf5_file, 'r')
 
 
 
@@ -224,3 +277,33 @@ def check_spectrogram_dimensions(hdf5_file):
     return spectrogram_shapes
 
 # Usage example
+# Example usage within the same script
+if __name__ == "__main__":
+    
+    
+    annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
+    annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
+    
+    AllAnno = pd.concat([annot_train, annot_val], axis=0)
+    AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
+    AllAnno = AllAnno.dropna(subset=['FileEndSec'])
+    
+    
+    #AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
+    annot_malahat = pd.read_csv('C:/Users/kaity/Documents/GitHub/Ecotype/Malahat.csv')
+    Validation =annot_malahat[annot_malahat['LowFreqHz'] < 8000]
+    
+    train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/TrainTest_08_khz_Melint16MetricsSNR.h5'
+    val_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/MalahatVal_08_khz_Melint16MetricsSNR.h5'
+    val_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/test.h5'
+
+    create_hdf5_dataset(annotations=AllAnno.iloc[1:20], hdf5_filename= val_hdf5_file)
+
+    hf = h5py.File(train_hdf5_file, 'r')
+
+    
+    
+    label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
+    
+    label_mapping_Validation = Validation[['label', 'Labels']].drop_duplicates()
+    
