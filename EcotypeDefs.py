@@ -98,6 +98,17 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
 def create_hdf5_dataset(annotations, hdf5_filename):
+    """
+    Create an HDF5 database with spectrogram images for DCLDE data.
+    
+    Parameters:
+        annotations (pd.df): pandas dataframe with headers for 'FilePath', 
+        'FileBeginSec','FileEndSec', 'label','traintest', 'Dep', 'Provider',
+        'KW','KW_certain'
+    Returns:
+        spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
+        SNR (float): Signal-to-Noise Ratio of the spectrogram.
+    """
     with h5py.File(hdf5_filename, 'w') as hf:
         train_group = hf.create_group('train')
         test_group = hf.create_group('test')
@@ -196,56 +207,12 @@ def create_hdf5_dataset_parallel(annotations, hdf5_filename, num_threads=4):
 
 
 
-def check_spectrogram_dimensions(hdf5_file):
-    with h5py.File(hdf5_file, 'r') as hf:
-        spectrogram_shapes = set()  # Set to store unique spectrogram shapes
-        for group_name in hf:
-            group = hf[group_name]
-            for key in group:
-                spectrograms = group[key]['spectrogram'][:]
-                for spectrogram in spectrograms:
-                    spectrogram_shapes.add(spectrogram.shape)
-    return spectrogram_shapes
-    with h5py.File(hdf5_filename, 'w') as hf:
-        train_group = hf.create_group('train')
-        test_group = hf.create_group('test')
-
-        n_rows = len(annotations)
-        # Read CSV file and process data
-        # Replace this with your code to iterate through the CSV file and generate spectrogram clips
-        #for index, row in AllAnno.iterrows():
-        for ii in range(0, n_rows):
-            row = annotations.iloc[ii]
-            file_path = row['FilePath']
-            start_time = row['FileBeginSec']
-            end_time = row['FileEndSec']
-            label = row['label']
-            traintest = row['traintest']
-            dep = row['Dep']
-            provider = row['Provider']
-            kw = row['KW']
-            kwCertin = row['KW_certain']
-
-            spec = load_and_process_audio_segment(file_path, start_time, end_time)
-
-            if traintest == 'Train':  # 80% train, 20% test
-                dataset = train_group
-            else:
-                dataset = test_group
-
-            dataset.create_dataset(f'{ii}/spectrogram', data=spec)
-            dataset.create_dataset(f'{ii}/label', data=label)
-            dataset.create_dataset(f'{ii}/deployment', data=dep)
-            dataset.create_dataset(f'{ii}/provider', data=provider)
-            dataset.create_dataset(f'{ii}/KW', data=kw)
-            dataset.create_dataset(f'{ii}/KW_certain', data=kwCertin)
-            
-            
-            print(ii, ' of ', len(annotations))
+import math
     
 class BatchLoader2(keras.utils.Sequence):
-    def __init__(self, hdf5_file, batch_size, trainTest='train',
-                 shuffle=True, n_classes=7, return_data_labels=False):
+    def __init__(self, hdf5_file, batch_size=250, trainTest='train',
+                 shuffle=True, n_classes=7, return_data_labels=False,
+                 minFreq = 'nan'):
         self.hf = h5py.File(hdf5_file, 'r')
         self.batch_size = batch_size
         self.trainTest = trainTest
@@ -255,6 +222,29 @@ class BatchLoader2(keras.utils.Sequence):
         self.data_keys = list(self.hf[trainTest].keys())
         self.num_samples = len(self.data_keys)
         self.indexes = np.arange(self.num_samples)
+        
+       
+        # Get th spectrogram size, assume something in Train
+        self.train_group = self.hf[trainTest]
+        self.first_key = list(self.train_group.keys())[0]
+        self.data =self.train_group[self.first_key]['spectrogram']
+        self.specSize = self.data.shape
+        
+        # If a frequency limit is set then  figure out what that is now
+        self.minFreq = minFreq
+        self.minIdx = 0
+        #This is for trimming the frequency range
+        if math.isfinite(self.minFreq):
+             mel_frequencies = librosa.core.mel_frequencies(n_mels= self.specSize[0]+2)
+
+             # Find the index corresponding to 500 Hz in mel_frequencies
+             self.minIdx = np.argmax(mel_frequencies >= self.minFreq)
+            
+            # # # also update the spectrogram size
+             self.data= self.data[self.minIdx:,:]
+             self.specSize = self.data.shape
+     
+        
         if self.shuffle:
             np.random.shuffle(self.indexes)
         
@@ -270,7 +260,7 @@ class BatchLoader2(keras.utils.Sequence):
         
         for i in range(start_index, end_index):
             key = self.data_keys[self.indexes[i]]
-            spec = self.hf[self.trainTest][key]['spectrogram'][:]
+            spec = self.hf[self.trainTest][key]['spectrogram'][self.minIdx:,:]
             label = self.hf[self.trainTest][key]['label'][()]
             batch_data.append(spec)
             batch_labels.append(label)
@@ -283,18 +273,116 @@ class BatchLoader2(keras.utils.Sequence):
     def on_epoch_end(self):
         if self.shuffle:
             np.random.shuffle(self.indexes)
+            print('Epoc end all shuffled!')
 
 
+import tensorflow as tf
+from tensorflow.keras.utils import to_categorical
+
+
+class BatchLoader3:
+    def __init__(self, hdf5_file, batch_size=250, trainTest='train',
+                 shuffle=True, n_classes=7, return_data_labels=False,
+                 minFreq='nan'):
+        self.hf = h5py.File(hdf5_file, 'r')
+        self.batch_size = batch_size
+        self.trainTest = trainTest
+        self.shuffle = shuffle
+        self.n_classes = n_classes
+        self.return_data_labels = return_data_labels
+        self.data_keys = list(self.hf[trainTest].keys())
+        self.num_samples = len(self.data_keys)
+        
+        # Get the spectrogram size from the first sample
+        first_key = self.data_keys[0]
+        self.data = self.hf[trainTest][first_key]['spectrogram']
+        self.specSize = self.data.shape
+        
+        # Handle minimum frequency
+        self.minFreq = minFreq
+        if math.isfinite(self.minFreq):
+            mel_frequencies = librosa.core.mel_frequencies(n_mels=self.specSize[0] + 2)
+            self.minIdx = np.argmax(mel_frequencies >= self.minFreq)
+            self.specSize = self.data[self.minIdx:, :].shape
+        
+        if self.shuffle:
+            np.random.shuffle(self.data_keys)
+
+    def __len__(self):
+        return int(np.ceil(self.num_samples / self.batch_size))
+
+    def generate_dataset(self):
+        # Create a list of (data, label) tuples
+        dataset = []
+        for key in self.data_keys:
+            spec = self.hf[self.trainTest][key]['spectrogram'][self.minIdx:, :]
+            label = self.hf[self.trainTest][key]['label'][()]
+            dataset.append((spec, label))
+
+        # Shuffle dataset if needed
+        if self.shuffle:
+            np.random.shuffle(dataset)
+
+        # Separate data and labels
+        data_list, labels_list = zip(*dataset)
+
+        # Convert lists to numpy arrays
+        data_array = np.array(data_list)
+        labels_array = np.array(labels_list)
+
+        # If returning data and labels, return as tuple
+        if self.return_data_labels:
+            return data_array, labels_array
+
+        # Otherwise, return as TensorFlow Dataset
+        return tf.data.Dataset.from_tensor_slices((data_array, to_categorical(labels_array, num_classes=self.n_classes)))
+
+from tensorflow.keras import backend as K
+def custom_weighted_loss(class_weights, priorities):
+    """
+    Custom weighted categorical crossentropy loss function.
+
+    Parameters:
+    - class_weights: Dictionary containing weights for each class.
+    - priorities: List of lists where each sublist represents a group of classes with a priority.
+
+    Returns:
+    - loss function to be used in model compilation.
+    """
+    def loss(y_true, y_pred):
+        # Convert class weights to tensor
+        weights = tf.constant([class_weights[key] for key in sorted(class_weights.keys())], dtype=tf.float32)
+        
+        # Convert priorities to a tensor
+        priority_indices = [sorted(class_weights.keys()).index(cls) for priority_group in priorities for cls in priority_group]
+        priority_mask = K.one_hot(priority_indices, len(class_weights))  # Remove dtype argument
+        
+        # Calculate cross entropy
+        y_pred = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())  # Clip to prevent log(0) instability
+        cross_entropy = -y_true * K.log(y_pred)
+        
+        # Apply weights and priorities
+        weighted_cross_entropy = cross_entropy * weights
+        weighted_cross_entropy *= priority_mask
+        
+        # Sum over classes and mean over batch
+        return K.mean(K.sum(weighted_cross_entropy, axis=-1))
+    
+    return loss
 
 def train_model(model, train_generator, val_generator, epochs):
     # Define early stopping callback
-    early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='val_loss',
+                                   patience=3, 
+                                   restore_best_weights=True)
    
     # Train the model with early stopping
     model.fit(x=train_generator,  # Here, `train_generator` should be a generator object
               epochs=epochs,
               validation_data=val_generator,
               callbacks=[early_stopping])
+    
+    
 
 def check_spectrogram_dimensions(hdf5_file):
     with h5py.File(hdf5_file, 'r') as hf:
@@ -371,9 +459,20 @@ def compile_det_class_model(model):
                   metrics={'killer_whale': 'accuracy', 'ecotype': 'accuracy'})
     return model
 
+
+
 # Compile model
-def compile_model(model):
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+def compile_model(model, loss_val = 'categorical_crossentropy'):
+    model.compile(loss=loss_val,
+                  optimizer='adam', 
+                  metrics=['accuracy'])
+    return model
+
+def compile_model_customWeights(model, class_weights, priorities):
+    # Compile the model with the custom loss function
+    model.compile(optimizer='adam', 
+                  loss=custom_weighted_loss(class_weights, priorities),
+                  metrics=['accuracy'])
     return model
 
 def batch_conf_matrix(loaded_model, val_batch_loader):
@@ -385,9 +484,52 @@ def batch_conf_matrix(loaded_model, val_batch_loader):
     total_batches = len(val_batch_loader)
     
     # Iterate over test data generator batches
+    for i in range(0, len(val_batch_loader)):
+        batch_data = val_batch_loader.__getitem__(i)
+        
+        # Predict on the current batch
+        batch_pred = loaded_model.predict(batch_data[0])
+        
+        # Convert predictions to class labels
+        batch_pred_labels = np.argmax(batch_pred, axis=1)
+        
+        # Convert true labels to class labels
+        batch_true_labels = np.argmax(batch_data[1], axis=1)
+        
+        # Accumulate predictions and true labels
+        y_pred_accum.extend(batch_pred_labels)
+        y_true_accum.extend(batch_true_labels)
+        
+        # Print progress
+        print(f'Batch {i+1}/{total_batches} processed')
+    
+    # Convert accumulated lists to arrays
+    y_pred_accum = np.array(y_pred_accum)
+    y_true_accum = np.array(y_true_accum)
+    
+    # Compute confusion matrix
+    conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
+    
+    print("Confusion Matrix:")
+
+###################################################################
+# Model evaluation
+###################################################################
+from sklearn.metrics import confusion_matrix
+
+def confuseionMat(model, val_batch_loader):
+    # Initialize lists to accumulate predictions and true labels
+    y_pred_accum = []
+    y_true_accum = []
+    
+    # Get the total number of batches
+    total_batches = len(val_batch_loader)
+    
+    
+    # Iterate over test data generator batches
     for i, (batch_data, batch_labels) in enumerate(val_batch_loader):
         # Predict on the current batch
-        batch_pred = loaded_model.predict(batch_data)
+        batch_pred = model.predict(batch_data)
         
         # Convert predictions to class labels
         batch_pred_labels = np.argmax(batch_pred, axis=1)
@@ -408,9 +550,7 @@ def batch_conf_matrix(loaded_model, val_batch_loader):
     
     # Compute confusion matrix
     conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
-    
-    print("Confusion Matrix:")
-
+    return conf_matrix
 
 
 

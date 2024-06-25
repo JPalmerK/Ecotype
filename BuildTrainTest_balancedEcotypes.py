@@ -9,11 +9,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import EcotypeDefs as Eco
-
+from keras.models import load_model
 
 
 # New more balanced train/test dataset so load that then create the HDF5 database
-
 annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
 annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
 
@@ -27,11 +26,10 @@ label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
 
 # Create the HDF5 file
 h5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/Balanced_melSpec_8khz.h5'
-
 Eco.create_hdf5_dataset(annotations=AllAnno, hdf5_filename= h5_file)
 #
 # Assuming annotations is your DataFrame containing audio segment metadata
-Eco.create_hdf5_dataset_parallel(AllAnno, 'data_parallel1.h5',  8)
+#Eco.create_hdf5_dataset_parallel(AllAnno, 'data_parallel2.h5',  8)
 
 
 hf = h5py.File(h5_file, 'r')
@@ -52,11 +50,27 @@ test_batch_loader =  Eco.BatchLoader2(h5_file,
 
 
 
+
 # Train model
-Eco.train_model(model, train_batch_loader, test_batch_loader, epochs=2)
+loaded_model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Balanced_melSpec_8khz.keras')
+Eco.train_model(loaded_model, train_batch_loader, test_batch_loader, epochs=18)
+loaded_model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Balanced_melSpec_8khz.keras')
 
 
-hf = h5py.File(h5_file, 'r')
+# Create the database for the the validation data
+annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/Malahat.csv")
+annot_val = annot_val[annot_val['LowFreqHz'] < 8000]
+
+h5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/MalahatBalanced_melSpec_8khz1.h5'
+Eco.create_hdf5_dataset(annotations=annot_val,
+                        hdf5_filename= h5_file)
+
+# Create the confusion matrix
+val_batch_loader =  Eco.BatchLoader2(h5_file, 
+                           trainTest = 'train', batch_size=250,  n_classes=7)
+confResults = Eco.confuseionMat(model= loaded_model, 
+                                val_batch_loader=val_batch_loader)
+
 
 
 

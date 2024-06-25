@@ -72,17 +72,17 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     col_medians = np.median(spec, axis=0, keepdims=True)
     spec_normalized = spec - row_medians - col_medians
     
-    # spec_img = librosa.display.specshow(spec_normalized,
-    #                                       sr=sample_rate,
-    #                                       hop_length=hop_length,     
-    #                                       x_axis='time',
-    #                                       y_axis='log')
+    spec_img = librosa.display.specshow(spec_normalized,
+                                          sr=sample_rate,
+                                          hop_length=hop_length,     
+                                          x_axis='time',
+                                          y_axis='log')
     
-    # plt.colorbar(format='%+2.0f dB')
-    # plt.title('Spectrogram')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title('Spectrogram')
     
-    # plt.tight_layout()
-    # plt.show()
+    plt.tight_layout()
+    plt.show()
     
     return spec_normalized
 

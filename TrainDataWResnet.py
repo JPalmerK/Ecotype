@@ -54,7 +54,8 @@ class BatchLoader:
         #percentage = (self.current_index / self.num_samples) * 100
         #print(f"Percentage of epoch completed for training: {percentage:.2f}%")
 
-        return np.array(batch_data),  keras.utils.to_categorical(np.array(batch_labels), num_classes=self.n_classes) 
+        return np.array(batch_data),  keras.utils.to_categorical(np.array(batch_labels), 
+                                                                 num_classes=self.n_classes) 
 
    
 class BatchLoader2(keras.utils.Sequence):
@@ -129,12 +130,8 @@ def train_model(model, train_generator, val_generator, epochs):
    
    # Train the model with early stopping
    model.fit(x=train_generator,
-             epochs=epochs,
-             validation_data=val_generator,
-             callbacks=[early_stopping])
-   model.fit(x=train_generator,
               epochs=epochs,
-              validation_data=val_generator)
+              validation_data=val_generator, callbacks=[early_stopping])
 # Example usage:
 # Assuming input shape (314, 128, 1) for single channel images
 # and 7 classes
@@ -150,15 +147,18 @@ model = create_model(input_shape, num_classes)
 # Define the train and test batch loader
 # Example usage
 train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
+
+
+train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/TrainTest_08_khz_Melint16MetricsSNR.h5'
 train_batch_loader = BatchLoader2(train_hdf5_file, 
-                           trainTest = 'train', batch_size=150, n_classes=7)
+                           trainTest = 'train', batch_size=250, n_classes=7)
 test_batch_loader =  BatchLoader2(train_hdf5_file, 
-                           trainTest = 'test', batch_size=150,  n_classes=7)
+                           trainTest = 'test', batch_size=250,  n_classes=7)
 
 # Train the model
-train_model(model, train_batch_loader, test_batch_loader, epochs=10)
-model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/pilot_v1.h5')
-model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/pilot_v1.keras')
+train_model(model, train_batch_loader, test_batch_loader, epochs=20)
+model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/KkerasAutoStop.keras')
+#model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/pilot_v1.keras')
 
 ###########################################################################
 # Load and evaluate the model
@@ -211,21 +211,21 @@ conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
 
 print("Confusion Matrix:")
 print(conf_matrix)
-    # Predict on the current batch
-    batch_pred = loaded_model.predict(batch_data)
+    # # Predict on the current batch
+    # batch_pred = loaded_model.predict(batch_data)
     
-    # Convert predictions to class labels
-    batch_pred_labels = np.argmax(batch_pred, axis=1)
+    # # Convert predictions to class labels
+    # batch_pred_labels = np.argmax(batch_pred, axis=1)
     
-    # Convert true labels to class labels
-    batch_true_labels = np.argmax(batch_labels, axis=1)
+    # # Convert true labels to class labels
+    # batch_true_labels = np.argmax(batch_labels, axis=1)
     
-    # Accumulate predictions and true labels
-    y_pred_accum.extend(batch_pred_labels)
-    y_true_accum.extend(batch_true_labels)
+    # # Accumulate predictions and true labels
+    # y_pred_accum.extend(batch_pred_labels)
+    # y_true_accum.extend(batch_true_labels)
     
-    # Print progress
-    print(f'Batch {i+1}/{total_batches} processed')
+    # # Print progress
+    # print(f'Batch {i+1}/{total_batches} processed')
 
 
 
@@ -266,6 +266,8 @@ def identity_block(input_tensor, filters):
 # Initialize batch loader
 
 train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/AllAnno4khz_Melint16.h5'
+
+train_hdf5_file = 'C:/Users/kaity/Documents/GitHub/Ecotype/TrainTest_08_khz_Melint16MetricsSNR.h5'
 train_batch_loader = BatchLoader2(train_hdf5_file, 
                            trainTest = 'train', batch_size=250, n_classes=7)
 test_batch_loader =  BatchLoader2(train_hdf5_file, 
@@ -283,7 +285,7 @@ model = compile_model(model)
 # Train model
 train_model(model, train_batch_loader, test_batch_loader, epochs=12)
 
-model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/Resnetv1.keras')
+model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models/Resnetv.keras')
 
 ###########################################################################
 # Load and evaluate the resnet model
@@ -298,6 +300,7 @@ test_batch_loader =  BatchLoader2(train_hdf5_file,
 
 
 ValData  = 'C:/Users/kaity/Documents/GitHub/Ecotype/Malahat4khz_Melint16.h5'
+ValData = 'C:/Users/kaity/Documents/GitHub/Ecotype/MalahatVal_08_khz_Melint16MetricsSNR.h5'
 val_batch_loader =  BatchLoader2(ValData, 
                            trainTest = 'train', batch_size=500,  n_classes=7)
 
@@ -347,8 +350,7 @@ conf_matrix_norm = conf_matrix.astype('float') / conf_matrix.sum(axis=1)[:, np.n
 print("Confusion Matrix (Proportions):")
 print(conf_matrix_norm)
 
-
-
+f
 
 annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
 annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
