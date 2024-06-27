@@ -510,6 +510,7 @@ def batch_conf_matrix(loaded_model, val_batch_loader):
     # Compute confusion matrix
     conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
     
+    return(conf_matrix)
     print("Confusion Matrix:")
 
 ###################################################################
@@ -517,41 +518,124 @@ def batch_conf_matrix(loaded_model, val_batch_loader):
 ###################################################################
 from sklearn.metrics import confusion_matrix
 
-def confuseionMat(model, val_batch_loader):
-    # Initialize lists to accumulate predictions and true labels
-    y_pred_accum = []
-    y_true_accum = []
+# def confuseionMat(model, val_batch_loader):
+#     # Initialize lists to accumulate predictions and true labels
+#     y_pred_accum = []
+#     y_true_accum = []
     
-    # Get the total number of batches
-    total_batches = len(val_batch_loader)
+#     # Get the total number of batches
+#     total_batches = len(val_batch_loader)
     
     
-    # Iterate over test data generator batches
-    for i, (batch_data, batch_labels) in enumerate(val_batch_loader):
-        # Predict on the current batch
-        batch_pred = model.predict(batch_data)
+#     # Iterate over test data generator batches
+#     for i, (batch_data, batch_labels) in enumerate(val_batch_loader):
+#         # Predict on the current batch
+#         batch_pred = model.predict(batch_data)
         
-        # Convert predictions to class labels
-        batch_pred_labels = np.argmax(batch_pred, axis=1)
+#         # Convert predictions to class labels
+#         batch_pred_labels = np.argmax(batch_pred, axis=1)
         
-        # Convert true labels to class labels
-        batch_true_labels = np.argmax(batch_labels, axis=1)
+#         # Convert true labels to class labels
+#         batch_true_labels = np.argmax(batch_labels, axis=1)
         
-        # Accumulate predictions and true labels
-        y_pred_accum.extend(batch_pred_labels)
-        y_true_accum.extend(batch_true_labels)
+#         # Accumulate predictions and true labels
+#         y_pred_accum.extend(batch_pred_labels)
+#         y_true_accum.extend(batch_true_labels)
         
-        # Print progress
-        print(f'Batch {i+1}/{total_batches} processed')
+#         # Print progress
+#         print(f'Batch {i+1}/{total_batches} processed')
     
-    # Convert accumulated lists to arrays
-    y_pred_accum = np.array(y_pred_accum)
-    y_true_accum = np.array(y_true_accum)
+#     # Convert accumulated lists to arrays
+#     y_pred_accum = np.array(y_pred_accum)
+#     y_true_accum = np.array(y_true_accum)
     
-    # Compute confusion matrix
-    conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
-    return conf_matrix
+#     # Compute confusion matrix
+#     conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
+#     return conf_matrix
+
+
+#############################################################################
+# Bigger resenet
+#############################################################################
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv2D, BatchNormalization, MaxPooling2D, Dropout
+from tensorflow.keras.layers import Add, ReLU, AveragePooling2D, Flatten, Dense
+
+
+def ConvBlock(inputs, filters, kernel_size, strides=(1, 1), padding='same'):
+    x = Conv2D(filters=filters, kernel_size=kernel_size, strides=strides, padding=padding)(inputs)
+    x = BatchNormalization()(x)
+    x = ReLU()(x)
+    return x
+
+
+def IdentityBlock(inputs, filters, kernel_size, padding='same'):
+    x = Conv2D(filters=filters, kernel_size=kernel_size, padding=padding)(inputs)
+    x = BatchNormalization()(x)
+    x = ReLU()(x)
+    return Add()([x, inputs])
+
+
+def ResNet18(input_shape, num_classes):
+    input_layer = Input(shape=input_shape)
+  
+    # BLOCK-1
+    x = ConvBlock(input_layer, filters=64, kernel_size=(7, 7), strides=(2, 2), padding='same')
+    x = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding='same')(x)
+
+    # BLOCK-2
+    x = ConvBlock(x, filters=64, kernel_size=(3, 3), padding='same')
+    x = ConvBlock(x, filters=64, kernel_size=(3, 3), padding='same')
+    x = Dropout(0.5)(x)
+    op2_1 = IdentityBlock(x, filters=64, kernel_size=(3, 3))
+
+    x = ConvBlock(op2_1, filters=64, kernel_size=(3, 3), padding='same')
+    x = ConvBlock(x, filters=64, kernel_size=(3, 3), padding='same')
+    x = Dropout(0.5)(x)
+    op2 = IdentityBlock(x, filters=64, kernel_size=(3, 3))
+
+    # BLOCK-3
+    x = ConvBlock(op2, filters=128, kernel_size=(3, 3), strides=(2, 2), padding='same')
+    x = ConvBlock(x, filters=128, kernel_size=(3, 3), padding='same')
+    adjust_op2 = Conv2D(filters=128, kernel_size=(1, 1), strides=(2, 2), padding='valid')(op2)
+    x = Dropout(0.5)(x)
+    op3_1 = IdentityBlock(x, filters=128, kernel_size=(3, 3))
+
+    x = ConvBlock(op3_1, filters=128, kernel_size=(3, 3), padding='same')
+    x = ConvBlock(x, filters=128, kernel_size=(3, 3), padding='same')
+    x = Dropout(0.5)(x)
+    op3 = IdentityBlock(x, filters=128, kernel_size=(3, 3))
+
+    # BLOCK-4
+    x = ConvBlock(op3, filters=256, kernel_size=(3, 3), strides=(2, 2), padding='same')
+    x = ConvBlock(x, filters=256, kernel_size=(3, 3), padding='same')
+    adjust_op3 = Conv2D(filters=256, kernel_size=(1, 1), strides=(2, 2), padding='valid')(op3)
+    x = Dropout(0.5)(x)
+    op4_1 = IdentityBlock(x, filters=256, kernel_size=(3, 3))
+
+    x = ConvBlock(op4_1, filters=256, kernel_size=(3, 3), padding='same')
+    x = ConvBlock(x, filters=256, kernel_size=(3, 3), padding='same')
+    x = Dropout(0.5)(x)
+    op4 = IdentityBlock(x, filters=256, kernel_size=(3, 3))
+
+    # BLOCK-5
+    x = ConvBlock(op4, filters=512, kernel_size=(3, 3), strides=(2, 2), padding='same')
+    x = ConvBlock(x, filters=512, kernel_size=(3, 3), padding='same')
+    adjust_op4 = Conv2D(filters=512, kernel_size=(1, 1), strides=(2, 2), padding='valid')(op4)
+    x = Dropout(0.5)(x)
+    op5_1 = IdentityBlock(x, filters=512, kernel_size=(3, 3))
+
+    x = ConvBlock(op5_1, filters=512, kernel_size=(3, 3), padding='same')
+    x = ConvBlock(x, filters=512, kernel_size=(3, 3), padding='same')
+    x = Dropout(0.5)(x)
+    op5 = IdentityBlock(x, filters=512, kernel_size=(3, 3))
+
+    # FINAL BLOCK
+    x = Flatten()(x)
+    x = Dense(128, activation='relu')(x)
+    output_layer = Dense(num_classes, activation='softmax')(x)
+    model = Model(inputs=input_layer, outputs=output_layer)
 
 
 
-
+    return model
