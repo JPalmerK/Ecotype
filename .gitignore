@@ -6,3 +6,4 @@ blarg1
 blarg2
 *.keras
 *.pyc
+*.csv

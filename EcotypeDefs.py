@@ -120,7 +120,8 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
     return spectrogram
 
 # Redefine to independnetly create the audio representations
-def load_and_process_audio_segment(file_path, start_time, end_time, return_snr=False, **kwargs):
+def load_and_process_audio_segment(file_path, start_time, end_time,
+                                   return_snr=False, **kwargs):
     """
     Load an audio segment from a file, process it, and create a spectrogram image.
 
@@ -282,7 +283,7 @@ def load_and_process_audio_segment(file_path, start_time, end_time, return_snr=F
 #     return spec_normalized, float(SNR)
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
-def create_hdf5_dataset(annotations, hdf5_filename):
+def create_hdf5_dataset(annotations, hdf5_filename, parms):
     """
     Create an HDF5 database with spectrogram images for DCLDE data.
     
@@ -294,7 +295,10 @@ def create_hdf5_dataset(annotations, hdf5_filename):
         spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
         SNR (float): Signal-to-Noise Ratio of the spectrogram.
     """
+    # write the parameters for recovering latter
+    
     with h5py.File(hdf5_filename, 'w') as hf:
+        parms = hf.create_dataset('AudioParameters', data=parms)
         train_group = hf.create_group('train')
         test_group = hf.create_group('test')
 
@@ -315,7 +319,8 @@ def create_hdf5_dataset(annotations, hdf5_filename):
             kwCertin = row['KW_certain']
             utc = row['UTC']
 
-            spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time)
+            spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time,
+                                               return_snr=True, **parms)
 
             if traintest == 'Train':  # 80% train, 20% test
                 dataset = train_group
