@@ -1,20 +1,21 @@
 import os
 import soundfile as sf
-import librosa
+#import librosa
 import numpy as np
 from EcotypeDefs import create_spectrogram  # Assuming this function is defined in EcotypeDefs.py
 
 class AudioProcessor:
     def __init__(self, folder_path, segment_duration=2.0, overlap=1.0, params=None):
-        
         self.folder_path = folder_path
         self.audio_files = [f for f in os.listdir(folder_path) if f.endswith(('.wav', '.mp3', '.flac', '.ogg'))]
         self.segment_duration = segment_duration  # Duration of each segment in seconds
         self.overlap = overlap  # Overlap between segments in seconds
         self.model_input_shape = None  # To store model's input shape
-        #self.min_freq = min_freq  # Minimum frequency to exclude
-        #self.fs = fs  # Sample rate for resampling
         
+        # Initialize numpy array for predictions and list for time since start
+        self.all_predictions = None
+        self.time_since_start = []
+
         # Set default parameters for create_spectrogram
         if params is None:
             params = {
@@ -53,39 +54,50 @@ class AudioProcessor:
         
         # Ensure spectrogram matches the model's input shape
         expected_time_steps = self.model_input_shape[1]
-        
     
         # Call create_spectrogram function with parameters
-        spectrogram = create_spectrogram(y,  return_snr=False,  **self.params)
-        
+        spectrogram = create_spectrogram(y, return_snr=False, **self.params)
         
         # Resize or pad to match expected input shape
         if spectrogram.shape[1] < expected_time_steps:
             # Pad spectrogram if it's shorter than expected time steps
             spectrogram = np.pad(spectrogram, 
-                                     ((0, 0), 
-                                      (0, expected_time_steps - 
-                                       spectrogram.shape[1])), 
-                                     mode='constant')
-            
+                                 ((0, 0), 
+                                  (0, expected_time_steps - spectrogram.shape[1])), 
+                                 mode='constant')
         elif spectrogram.shape[1] > expected_time_steps:
             # Trim spectrogram if it's longer than expected time steps
             spectrogram = spectrogram[:, :expected_time_steps]
-        
         
         return spectrogram
 
     def predict_segments(self, segments, model, sr):
         if self.model_input_shape is None:
             self.model_input_shape = model.input_shape[1:]  # Skip batch size dimension
-        
-        predictions = []
-        for segment in segments:
+    
+        # Initialize predictions array and time list if not already initialized
+        if self.all_predictions is None:
+            self.all_predictions = np.empty((len(segments), model.output_shape[1]))
+            self.time_since_start = [0] * len(segments)  # Placeholder for time since start
+    
+        time_accumulated = 0  # Track the accumulated time
+        segment_duration_samples = int(self.segment_duration * sr)
+        overlap_samples = int(self.overlap * sr)
+    
+        for idx, segment in enumerate(segments):
             spectrogram = self.create_spectrogram(segment, sr)
             spectrogram = np.expand_dims(spectrogram, axis=0)  # Add batch dimension
             prediction = model.predict(spectrogram)
-            predictions.append(prediction)
-        return predictions
+    
+            # Update predictions array
+            self.all_predictions[idx] = prediction
+    
+            # Update time since start
+            if idx > 0:
+                time_accumulated +=  overlap_samples  # Add overlap for all except the first segment
+            self.time_since_start[idx] = time_accumulated / sr  # Convert to seconds
+    
+        return self.all_predictions, self.time_since_start
 
     def create_detections(self, all_predictions, 
                           thresholds=[0.8, 0.8, 0.8, 0.8, 0.8],
@@ -119,12 +131,6 @@ class AudioProcessor:
                     current_start, current_end = detection
             merged_detections.append((current_start, current_end))
         return merged_detections
-    
-        def output_to_raven_pro(self, detections, class_id, output_file):
-            with open(output_file, 'w') as f:
-                f.write("Selection ID, Begin Time (s), End Time (s), Low Freq (Hz), High Freq (Hz), Class ID\n")
-                for i, (start_time, end_time) in enumerate(detections):
-                    f.write(f"{i+1}, {start_time}, {end_time}, , , {class_id}\n")
 
 if __name__ == "__main__":
     
@@ -147,10 +153,10 @@ if __name__ == "__main__":
     # Example usage for testing and debugging
     folder_path = 'C:\\TempData\\Malahat\\STN1\\20160218'
     audio_processor = AudioProcessor(folder_path, segment_duration=2.0, 
-                                     overlap=1.0,  params= AudioParms)
+                                     overlap=0.5,  params= AudioParms)
 
     # Load  Keras model
-    model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/ReBalanced_melSpec_7class_8khz_wider_3.keras')
+    model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\ReBalanced_melSpec_7class_8khz_wider_3.keras')
 
 
     # Process audio files segment by segment and predict
@@ -164,7 +170,7 @@ if __name__ == "__main__":
         
         # Predict on segments
         predictions = audio_processor.predict_segments(segments, model, sr)
-        all_predictions.append(predictions)
+        #all_predictions.append(predictions)
 
     # Create detections based on predictions for each class
     thresholds = [.8, .8, .8, .8, .8, .8, .8]  # Adjust thresholds as needed for each class
