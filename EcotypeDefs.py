@@ -30,256 +30,71 @@ from keras import Model
 from keras.callbacks import EarlyStopping
 
 
-def create_spectrogram(audio, return_snr=False,**kwargs):
+
+
+def load_and_process_audio_segment(file_path, start_time, end_time,
+                                   clipDur=2, outSR=16000):
     """
-    Create the audio representation.
-
-    kwargs options:
-        clipDur (float): clip duration (sec).
-        nfft (int): FFT window size (samples).
-        hop_length (int): Hop length (samples).
-        outSR (int): Target sampling rate.
-        spec_type (str): Spectrogram type, 'normal' or 'mel'.
-        min_freq (int): Minimum frequency to retain.
-        rowNorm (bool): Normalize the spectrogram rows.
-        colNorm (bool): Normalize the spectrogram columns.
-        rmDCoffset (bool): Remove DC offset by subtracting mean.
-        inSR (int): Original sample rate of the audio file (if decimation is needed).
-
-    Returns:
-        spectrogram (numpy.ndarray): Normalized spectrogram of the audio segment.
-    """
+    Load an audio segment from a file, process it as described, and create a spectrogram image.
     
-    # Default parameters
-    params = {
-        'clipDur': 2,           # clip duration (sec)
-        'nfft': 512,            # default FFT window size (samples)
-        'hop_length': 3200,     # default hop length (samples)
-        'outSR': 16000,         # default target sampling rate
-        'spec_type': 'normal',  # default spectrogram type, 'normal' or 'mel'
-        'min_freq': None,       # default minimum frequency to retain
-        'rowNorm': True,        # normalize the spectrogram rows
-        'colNorm': True,        # normalize the spectrogram columns
-        'rmDCoffset': True,     # remove DC offset by subtracting mean
-        'inSR': None,            # original sample rate of the audio file
-    }
-
-    # Update parameters based on kwargs
-    for key, value in kwargs.items():
-        if key in params:
-            params[key] = value
-        else:
-            raise TypeError(f"Invalid keyword argument '{key}'")
-    
-    # Downsample data if necessary
-    if params['inSR'] and params['inSR'] != params['outSR']:
-        audio = librosa.resample(audio, orig_sr=params['inSR'], target_sr=params['outSR'])
-    
-    # Remove DC offset
-    if params['rmDCoffset']:
-        audio = audio - np.mean(audio)
-    
-    # Compute spectrogram
-    if params['spec_type'] == 'normal':
-        spectrogram = np.abs(librosa.stft(audio, n_fft=params['nfft'], hop_length=params['hop_length']))
-        spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
-        
-    elif params['spec_type'] == 'mel':
-        
-        spectrogram = librosa.feature.melspectrogram(y=audio, 
-                                                     sr=params['outSR'], 
-                                                     n_fft=params['nfft'], 
-                                                     hop_length=params['hop_length'])
-        spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
-        
-    else:
-        raise ValueError("Invalid spectrogram type. Supported types are 'normal' and 'mel'.")
-    
-    # Normalize the spectrogram
-    if params['rowNorm']:
-        row_medians = np.median(spectrogram, axis=1, keepdims=True)
-        spectrogram = spectrogram - row_medians
-        
-    if params['colNorm']:
-        col_medians = np.median(spectrogram, axis=0, keepdims=True)
-        spectrogram = spectrogram - col_medians
-    
-    # Trim frequencies if min_freq is specified
-    if params['min_freq'] is not None:
-        mel_frequencies = librosa.core.mel_frequencies(n_mels=spectrogram.shape[0] + 2)
-        min_idx = np.argmax(mel_frequencies >= params['min_freq'])
-        spectrogram = spectrogram[min_idx:, :]
-        
-    # Calculate SNR if requested
-    if return_snr:
-        signal_level = np.percentile(spectrogram, 85)
-        noise_level = np.percentile(spectrogram, 25)
-        SNR = signal_level - noise_level
-        return spectrogram, SNR
-    
-    return spectrogram
-
-# Redefine to independnetly create the audio representations
-def load_and_process_audio_segment(file_path, start_time, end_time, return_snr=False, **kwargs):
-    """
-    Load an audio segment from a file, process it, and create a spectrogram image.
-
     Parameters:
         file_path (str): Path to the audio file.
         start_time (float): Start time of the audio segment in seconds.
         end_time (float): End time of the audio segment in seconds.
-        return_snr (bool): Flag to return Signal-to-Noise Ratio of the spectrogram.
-        **kwargs: Additional keyword arguments passed to create_spectrogram.
-
+        clipDur (float): Duration of the desired spectrogram in seconds.
+        outSR (int): Target sample rate for resampling.
+    
     Returns:
-        spectrogram (numpy.ndarray): Normalized spectrogram of the audio segment.
-        SNR (float): Signal-to-Noise Ratio of the spectrogram (if return_snr=True).
+        spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
+        SNR (float): Signal-to-Noise Ratio of the spectrogram.
     """
-    
-    # Default parameters for create_spectrogram
-    params = {
-        'clipDur': 2,           # clip duration (sec)
-        'nfft': 512,            # default FFT window size (samples)
-        'hop_length': 3200,     # default hop length (samples)
-        'outSR': 16000,         # default target sampling rate
-        'spec_type': 'normal',  # default spectrogram type, 'normal' or 'mel'
-        'min_freq': None,       # default minimum frequency to retain
-        'rowNorm': True,        # normalize the spectrogram rows
-        'colNorm': True,        # normalize the spectrogram columns
-        'rmDCoffset': True,     # remove DC offset by subtracting mean
-        'inSR': None,           # original sample rate of the audio file
-    }
-
-    # Update parameters based on kwargs
-    for key, value in kwargs.items():
-        if key in params:
-            params[key] = value
-        else:
-            raise TypeError(f"Invalid keyword argument '{key}'")
-
     # Get the duration of the audio file
-    file_duration = librosa.get_duration(filename=file_path)
+    file_duration = librosa.get_duration(path=file_path)
     
-    # Calculate the duration of the desired audio segment
+    # Calculate the duration of the audio segment
     duration = end_time - start_time
     
     # Calculate the center time of the desired clip
     center_time = (start_time + end_time) / 2.0
     
     # Calculate new start and end times based on the center and clip duration
-    new_start_time = center_time - params['clipDur'] / 2
-    new_end_time = center_time + params['clipDur'] / 2
+    new_start_time = center_time - clipDur / 2
+    new_end_time = center_time + clipDur / 2
     
     # Adjust start and end times if the clip duration is less than desired
-    if new_end_time - new_start_time < params['clipDur']:
-        pad_length = params['clipDur'] - (new_end_time - new_start_time)
+    if new_end_time - new_start_time < clipDur:
+        pad_length = clipDur - (new_end_time - new_start_time)
         new_start_time = max(0, new_start_time - pad_length / 2.0)
         new_end_time = min(file_duration, new_end_time + pad_length / 2.0)
     
     # Ensure start and end times don't exceed the bounds of the audio file
-    new_start_time = max(0, min(new_start_time, file_duration - params['clipDur']))
-    new_end_time = max(params['clipDur'], min(new_end_time, file_duration))
+    new_start_time = max(0, min(new_start_time, file_duration - clipDur))
+    new_end_time = max(clipDur, min(new_end_time, file_duration))
     
-    # Load audio segment and downsample to the defined sampling rate
-    audio_data, sample_rate = librosa.load(file_path, sr=params['outSR'], 
-                                           offset=new_start_time,
-                                           duration=params['clipDur'])
-
-    # Create audio representation
-    spec, snr = create_spectrogram(audio_data, return_snr=return_snr, **params)
-
-    if return_snr:
-        return spec, snr
-    else:
-        return spec
-
-
-
-
-
-# def load_and_process_audio_segment(file_path, start_time, end_time, **kwargs
-#                                    clipDur=2, outSR=16000, y= None):
-#     """
-#     Load an audio segment from a file, process it as described, and create a spectrogram image.
+    # Load audio segment
+    audio_data, sample_rate = librosa.load(file_path, sr=outSR, offset=new_start_time, duration=clipDur)
     
-#     Parameters:
-#         file_path (str): Path to the audio file.
-#         start_time (float): Start time of the audio segment in seconds.
-#         end_time (float): End time of the audio segment in seconds.
-#         clipDur (float): Duration of the desired spectrogram in seconds.
-#         outSR (int): Target sample rate for resampling.
+    # Create spectrogram
+    n_fft = 512
+    hop_length = int(n_fft * 0.2)  # 90% overlap
     
-#     Returns:
-#         spec_normalized (numpy.ndarray): Normalized spectrogram of the audio segment.
-#         SNR (float): Signal-to-Noise Ratio of the spectrogram.
-#     """
+    spec = librosa.feature.melspectrogram(y=audio_data,
+                                          sr=outSR,
+                                          n_fft=n_fft,
+                                          hop_length=hop_length)
+    spec_db = librosa.power_to_db(spec, ref=np.max)
     
-#     # Pull out the parameters
-#     # Update parameters based on kwargs
-#     for key, value in kwargs.items():
-#         if key in params:
-#             params[key] = value
-#         else:
-#             raise TypeError(f"Invalid keyword argument '{key}'")
+    # Normalize spectrogram
+    row_medians = np.median(spec_db, axis=1, keepdims=True)
+    col_medians = np.median(spec_db, axis=0, keepdims=True)
+    spec_normalized = spec_db - row_medians - col_medians
     
+    # Calculate SNR using 25th and 85th percentiles
+    signal_level = np.percentile(spec_normalized, 85)
+    noise_level = np.percentile(spec_normalized, 25)
+    SNR = signal_level - noise_level
     
-#     outSR = params['outSR']
-#     clipDur = params['clipDur']
-    
-#     # trying to reuse this for the detector
-#     if isinstance(file_path, str):
-#     # Get the duration of the audio file
-#         file_duration = librosa.get_duration(path=file_path)
-        
-#         # Calculate the duration of the audio segment
-#         duration = end_time - start_time
-        
-#         # Calculate the center time of the desired clip
-#         center_time = (start_time + end_time) / 2.0
-        
-#         # Calculate new start and end times based on the center and clip duration
-#         new_start_time = center_time - clipDur / 2
-#         new_end_time = center_time + clipDur / 2
-        
-#         # Adjust start and end times if the clip duration is less than desired
-#         if new_end_time - new_start_time < clipDur:
-#             pad_length = clipDur - (new_end_time - new_start_time)
-#             new_start_time = max(0, new_start_time - pad_length / 2.0)
-#             new_end_time = min(file_duration, new_end_time + pad_length / 2.0)
-        
-#         # Ensure start and end times don't exceed the bounds of the audio file
-#         new_start_time = max(0, min(new_start_time, file_duration - clipDur))
-#         new_end_time = max(clipDur, min(new_end_time, file_duration))
-        
-#         # Load audio segment and downsample to the defined FS
-#         audio_data, sample_rate = librosa.load(file_path, sr=outSR, offset=new_start_time, duration=clipDur)
-    
-#     # data already loaded
-#     else:
-#         audio_data= file_path
-        
-    
-#     # Create spectrogram
-#     n_fft = 512
-#     hop_length = int(n_fft * 0.2)  # 90% overlap
-    
-#     spec = librosa.feature.melspectrogram(y=audio_data,
-#                                           sr=outSR,
-#                                           n_fft=n_fft,
-#                                           hop_length=hop_length)
-#     spec_db = librosa.power_to_db(spec, ref=np.max)
-    
-#     # Normalize spectrogram
-#     row_medians = np.median(spec_db, axis=1, keepdims=True)
-#     col_medians = np.median(spec_db, axis=0, keepdims=True)
-#     spec_normalized = spec_db - row_medians - col_medians
-    
-#     # Calculate SNR using 25th and 85th percentiles
-#     signal_level = np.percentile(spec_normalized, 85)
-#     noise_level = np.percentile(spec_normalized, 25)
-#     SNR = signal_level - noise_level
-    
-#     return spec_normalized, float(SNR)
+    return spec_normalized, float(SNR)
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
 def create_hdf5_dataset(annotations, hdf5_filename):
