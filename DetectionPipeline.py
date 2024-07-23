@@ -43,7 +43,8 @@ class AudioProcessor:
         segment_length = int(self.segment_duration * sr)
         overlap_length = int(self.overlap * sr)
         segments = []
-        for start in range(0, len(y) - segment_length + 1, segment_length - overlap_length):
+        for start in range(0, len(y) - segment_length + 1, 
+                           segment_length - overlap_length):
             segment = y[start:start + segment_length]
             segments.append(segment)
         return segments
@@ -138,25 +139,27 @@ if __name__ == "__main__":
     
     
     # Spectrogram parameters
+    # Spectrogram parameters
     AudioParms = {
-            'clipDur': 2,
-            'outSR': 16000,
-            'nfft': 512,
-            'hop_length':102,
-            'spec_type': 'mel',  # Assuming mel spectrogram is used
-            'rowNorm': True,
-            'colNorm': True,
-            'rmDCoffset': True,
-            'inSR': None}
+                'clipDur': 2,
+                'outSR': 16000,
+                'nfft': 512,
+                'hop_length':102,
+                'spec_type': 'mel',  # Assuming mel spectrogram is used
+                'rowNorm': True,
+                'colNorm': True,
+                'rmDCoffset': True,
+                'inSR': None}
     
     
-    # Example usage for testing and debugging
-    folder_path = 'C:\\TempData\\Malahat\\STN1\\20160218'
+    # Example usage for testing and debugging- these files have SRKWs in them
+    folder_path = 'C:\\TempData\\Malahat\\STN3\\20151028'
     audio_processor = AudioProcessor(folder_path, segment_duration=2.0, 
-                                     overlap=0.5,  params= AudioParms)
+                                     overlap=0.1,  params= AudioParms)
 
     # Load  Keras model
-    model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\ReBalanced_melSpec_7class_8khz_wider_3.keras')
+    model = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_SNR.keras')
+
 
 
     # Process audio files segment by segment and predict
@@ -175,6 +178,15 @@ if __name__ == "__main__":
     # Create detections based on predictions for each class
     thresholds = [.8, .8, .8, .8, .8, .8, .8]  # Adjust thresholds as needed for each class
     detections = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: []}  # Initialize detections dictionary
+    
+    
+    
+    class_index = 3
+    
+    
+    
+    
+    
     
     for class_index in range(7):  # Assuming there are 5 classes
         detections[class_index] = audio_processor.create_detections(all_predictions, 

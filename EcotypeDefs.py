@@ -296,18 +296,20 @@ def create_hdf5_dataset(annotations, hdf5_filename, parms):
         SNR (float): Signal-to-Noise Ratio of the spectrogram.
     """
     # write the parameters for recovering latter
-    
+          # Store the parameters as attributes
+    # Open HDF5 file in write mode
     with h5py.File(hdf5_filename, 'w') as hf:
-        parms = hf.create_dataset('AudioParameters', data=parms)
+        # Store parameters as attributes
+        for key, value in parms.items():
+            if value is not None:
+                hf.attrs[key] = value
+        
+        # Create groups for train and test datasets
         train_group = hf.create_group('train')
         test_group = hf.create_group('test')
 
-        n_rows = len(annotations)
-        # Read CSV file and process data
-        # Replace this with your code to iterate through the CSV file and generate spectrogram clips
-        #for index, row in AllAnno.iterrows():
-        for ii in range(0, n_rows):
-            row = annotations.iloc[ii]
+        # Iterate through annotations and create datasets
+        for idx, row in annotations.iterrows():
             file_path = row['FilePath']
             start_time = row['FileBeginSec']
             end_time = row['FileEndSec']
@@ -319,25 +321,25 @@ def create_hdf5_dataset(annotations, hdf5_filename, parms):
             kwCertin = row['KW_certain']
             utc = row['UTC']
 
-            spec, SNR = load_and_process_audio_segment(file_path, start_time, end_time,
-                                               return_snr=True, **parms)
+            # Load and process audio segment
+            spec, SNR = load_and_process_audio_segment(file_path, start_time, 
+                                                       end_time, return_snr=True, **parms)
 
-            if traintest == 'Train':  # 80% train, 20% test
-                dataset = train_group
-            else:
-                dataset = test_group
+            # Determine which group to store in (train or test)
+            dataset = train_group if traintest == 'Train' else test_group
 
-            dataset.create_dataset(f'{ii}/spectrogram', data=spec)
-            dataset.create_dataset(f'{ii}/label', data=label)
-            dataset.create_dataset(f'{ii}/deployment', data=dep)
-            dataset.create_dataset(f'{ii}/provider', data=provider)
-            dataset.create_dataset(f'{ii}/KW', data=kw)
-            dataset.create_dataset(f'{ii}/KW_certain', data=kwCertin)
-            dataset.create_dataset(f'{ii}/SNR', data=SNR)
-            dataset.create_dataset(f'{ii}/UTC', data=utc)
-            
-            
-            print(ii, ' of ', len(annotations))
+            # Create datasets for each attribute
+            data_group = dataset.create_group(f'{idx}')
+            data_group.create_dataset('spectrogram', data=spec)
+            data_group.create_dataset('label', data=label)
+            data_group.create_dataset('deployment', data=dep)
+            data_group.create_dataset('provider', data=provider)
+            data_group.create_dataset('KW', data=kw)
+            data_group.create_dataset('KW_certain', data=kwCertin)
+            data_group.create_dataset('SNR', data=SNR)
+            data_group.create_dataset('UTC', data=utc)
+
+            print(f"Processed {idx + 1} of {len(annotations)}")
 
 
 
@@ -405,7 +407,7 @@ import math
 class BatchLoader2(keras.utils.Sequence):
     def __init__(self, hdf5_file, batch_size=250, trainTest='train',
                  shuffle=True, n_classes=7, return_data_labels=False,
-                 minFreq = 'nan'):
+                 minFreq = None):
         self.hf = h5py.File(hdf5_file, 'r')
         self.batch_size = batch_size
         self.trainTest = trainTest
@@ -427,6 +429,9 @@ class BatchLoader2(keras.utils.Sequence):
         self.minFreq = minFreq
         self.minIdx = 0
         
+        # This really shouldn't be used anymore because the data representaion
+        # has the meta and as of now, if the frequencies are restricted there is
+        # no place to store that info.
         #This is for trimming the frequency range
         if math.isfinite(self.minFreq):
              mel_frequencies = librosa.core.mel_frequencies(n_mels= self.specSize[0]+2)
@@ -462,7 +467,9 @@ class BatchLoader2(keras.utils.Sequence):
         if self.return_data_labels:
             return batch_data, batch_labels
         else:
-            return np.array(batch_data), keras.utils.to_categorical(np.array(batch_labels), num_classes=self.n_classes)
+            return np.array(batch_data), 
+        keras.utils.to_categorical(np.array(batch_labels), 
+                                   num_classes=self.n_classes)
     def __shuffle__(self):
         np.random.shuffle(self.indexes)
         print('shuffled!')
@@ -473,87 +480,6 @@ class BatchLoader2(keras.utils.Sequence):
             np.random.shuffle(self.indexes)
             print('Epoc end all shuffled!')
 
-
-import h5py
-import numpy as np
-import keras.utils
-import math
-import librosa
-
-# class BatchLoader2pt5(keras.utils.Sequence):
-#     def __init__(self, hdf5_file, batch_size=250, trainTest='train',
-#                  shuffle=True, n_classes=7, return_data_labels=False,
-#                  minFreq='nan', return_vars=None):
-#         self.hf = h5py.File(hdf5_file, 'r')
-#         self.batch_size = batch_size
-#         self.trainTest = trainTest
-#         self.shuffle = shuffle
-#         self.n_classes = n_classes
-#         self.return_data_labels = return_data_labels
-#         self.return_vars = return_vars if return_vars else []
-#         self.data_keys = list(self.hf[trainTest].keys())
-#         self.num_samples = len(self.data_keys)
-#         self.indexes = np.arange(self.num_samples)
-
-#         # Get the spectrogram size, assuming data exists in 'train'
-#         self.train_group = self.hf[trainTest]
-#         self.first_key = list(self.train_group.keys())[0]
-#         self.data = self.train_group[self.first_key]['spectrogram']
-#         self.specSize = self.data.shape
-        
-#         # If a frequency limit is set, figure out what that is now
-#         self.minFreq = minFreq
-#         self.minIdx = 0
-#         if math.isfinite(self.minFreq):
-#             mel_frequencies = librosa.core.mel_frequencies(n_mels=self.specSize[0] + 2)
-#             self.minIdx = np.argmax(mel_frequencies >= self.minFreq)
-#             self.data = self.data[self.minIdx:, :]
-#             self.specSize = self.data.shape
-        
-#         if self.shuffle:
-#             np.random.shuffle(self.indexes)
-
-#     def __len__(self):
-#         return int(np.ceil(self.num_samples / self.batch_size))
-
-#     def __getitem__(self, index):
-#         start_index = index * self.batch_size
-#         end_index = min((index + 1) * self.batch_size, self.num_samples)
-        
-#         batch_data = []
-#         batch_labels = []
-#         batch_vars = {var: [] for var in self.return_vars}
-
-#         for i in range(start_index, end_index):
-#             key = self.data_keys[self.indexes[i]]
-#             spec = self.hf[self.trainTest][key]['spectrogram'][self.minIdx:, :]
-#             label = self.hf[self.trainTest][key]['label'][()]
-#             batch_data.append(spec)
-#             batch_labels.append(label)
-
-#             for var in self.return_vars:
-#                 if var in self.hf[self.trainTest][key]:
-#                     value = self.hf[self.trainTest][key][var][()]
-#                     batch_vars[var].append(value)
-#                 else:
-#                     raise KeyError(f"Variable '{var}' not found in HDF5 file for key '{key}'")
-
-#         if self.return_data_labels:
-#             return_list = [batch_data, batch_labels]
-#             for var in self.return_vars:
-#                 return_list.append(np.array(batch_vars[var]))
-#             return tuple(return_list)
-#         else:
-#             batch_labels = keras.utils.to_categorical(np.array(batch_labels), num_classes=self.n_classes)
-#             return_list = [np.array(batch_data), batch_labels]
-#             for var in self.return_vars:
-#                 return_list.append(np.array(batch_vars[var]))
-#             return tuple(return_list)
-
-#     def on_epoch_end(self):
-#         if self.shuffle:
-#             np.random.shuffle(self.indexes)
-#             print('Epoch end: all shuffled!')
 
 
 import tensorflow as tf
@@ -1032,3 +958,7 @@ def ResNet18(input_shape, num_classes):
 
 
     return model
+##########################################################################
+# Pipeline for detection process
+###########################################################################
+
