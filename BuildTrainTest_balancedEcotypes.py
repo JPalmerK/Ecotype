@@ -13,7 +13,7 @@ from keras.models import load_model
 
 
 # New more balanced train/test dataset so load that then create the HDF5 database
-annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain.csv")
+annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain2.csv")
 annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest.csv")
 
 AllAnno = pd.concat([annot_train, annot_val], axis=0)

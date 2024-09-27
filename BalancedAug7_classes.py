@@ -88,7 +88,60 @@ confResults = Eco.confuseionMat(model= model,
 ########################################################################
 
 
+# Now run it with the pipeline
 
+
+
+    # Load Keras model
+    model_path = 'C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_SNR.keras'
+    model = load_model(model_path)
+
+    # Spectrogram parameters
+    audio_params = {
+        'clipDur': 2,
+        'outSR': 16000,
+        'nfft': 512,
+        'hop_length': 102,
+        'spec_type': 'mel',  # Assuming mel spectrogram is used
+        'rowNorm': True,
+        'colNorm': True,
+        'rmDCoffset': True,
+        'inSR': None
+    }
+    
+    # Example detection thresholds (adjust as needed)
+    detection_thresholds = {
+        0: 0.8,  # Example threshold for class 0
+        1: 0.8,  # Example threshold for class 1
+        2: 0.9,  # Example threshold for class 2
+        3: 0.8,  # Example threshold for class 3
+        4: 0.8,  # Example threshold for class 4
+        5: 0.8,  # Example threshold for class 5
+        6: 0.9   # Example threshold for class 6
+    }
+    
+    class_names = {
+        0: 'Abiotic',
+        1: 'BKW',
+        2: 'HW',
+        3: 'NRKW',
+        4: 'Offshore',
+        5: 'SRKW',
+        6: 'Und Bio'
+    }
+    
+    # Example usage:
+    folder_path = 'C:\\TempData\\Malahat\\STN3\\20151028'
+    
+    # Initialize the AudioProcessor with your model and detection thresholds
+    processor = Eco.AudioProcessor(folder_path=folder_path, model=model,
+                               detection_thresholds=detection_thresholds, 
+                               class_names=class_names,    
+                               params = audio_params,
+                               overlap=0.25)
+    
+    # Process all audio files in the directory
+    processor.process_all_files()
 
 
 
