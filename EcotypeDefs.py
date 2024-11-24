@@ -142,6 +142,7 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         'rmDCoffset': True,     # remove DC offset by subtracting mean
         'inSR': None,            # original sample rate of the audio file
         'spec_power':2,
+        'returnDB':False,         # return spectrogram in linear or convert to db 
         'PCEN':False,             # Per channel energy normalization
         # PCEN parameters
         'PCEN_power':31,
@@ -192,6 +193,9 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         spectrogram = np.abs(spectrogram)**params['spec_power']
         #spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
         
+        if params['returnDB']==True:
+            spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
+        
     elif params['spec_type'] == 'mel':
         
         melspec = librosa.feature.melspectrogram(y=audio, 
@@ -214,6 +218,8 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
                 bias=params['bias'],
                 sr=params['outSR'],
                 hop_length=params['hop_length'])
+        else:
+            spectrogram =melspec
             
 
         
@@ -226,8 +232,9 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
             col_medians = np.median(spectrogram, axis=0, keepdims=True)
             spectrogram = spectrogram - col_medians        
         
-        #spectrogram = np.round(spectrogram,2)
-        #spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
+        if params['returnDB']==True:
+            #spectrogram = np.round(spectrogram,2)
+            spectrogram = librosa.power_to_db(spectrogram, ref=np.max)
     
     else:
         raise ValueError("Invalid spectrogram type. Supported types are 'normal' and 'mel'.")

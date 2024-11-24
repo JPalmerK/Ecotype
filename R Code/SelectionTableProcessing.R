@@ -478,7 +478,8 @@ allPrecisionRecall = rbind(precisionRecall_SRKW,precisionRecall_BKW)
 
 ggplot(allPrecisionRecall, aes(x =Recall, y = Precision, color= ModelOut))+
   geom_point()+
-  ggtitle('Birdnet Filtered Data BKW Eval')
+  ggtitle('Birdnet Filtered Data BKW Eval')+
+  xlim(0,1)+ylim(0,1)
   
 
 ###########################################################################
@@ -494,18 +495,18 @@ peakVals_SRKW<-pointPicking(SRKW_all, tstep =0.25)
 peakVals_BKW_all<-merge_peaks(peakVals_BKW, threshold = 1)
 peakVals_SRKW_all<-merge_peaks(peakVals_SRKW, threshold = 1)
 
-fileName = 'PeakPickerTestOutputAllDataMerged.txt'
-write.table(peakVals1, sep = '\t',
-            file = fileName, row.names = FALSE,
-            col.names = TRUE, quote = FALSE)
+# fileName = 'PeakPickerTestOutputAllDataMerged.txt'
+# write.table(peakVals1, sep = '\t',
+#             file = fileName, row.names = FALSE,
+#             col.names = TRUE, quote = FALSE)
 
 
 precisionRecall_SRKW <- precisionRecall_MatrixMethod(peakVals_SRKW_all,
-                                                     truthTable = truthTable)
+                                                     truthTable = truthTable_BKW)
 precisionRecall_SRKW$ModelOut = 'SRKW'
 
 precisionRecall_BKW <- precisionRecall_MatrixMethod(peakVals_BKW_all,
-                                                    truthTable = truthTable)
+                                                    truthTable = truthTable_BKW)
 precisionRecall_BKW$ModelOut = 'BKW'
 
 allPrecisionRecall = rbind(precisionRecall_SRKW,precisionRecall_BKW)
@@ -513,7 +514,8 @@ allPrecisionRecall = rbind(precisionRecall_SRKW,precisionRecall_BKW)
 
 ggplot(allPrecisionRecall, aes(x =Recall, y = Precision, color= ModelOut))+
   geom_point()+
-  ggtitle('Birdnet All Training Data BKW Eval')
+  ggtitle('Birdnet All Training Data BKW Eval')+
+  xlim(0,1)+ylim(0,1)
 
 
 

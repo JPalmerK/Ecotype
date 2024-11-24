@@ -24,12 +24,14 @@ annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain2
 annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest2_Edrive.csv")
 
 AllAnno = pd.concat([annot_train, annot_val], axis=0)
+
+AllAnno = pd.read_csv("C:/Users/kaity/Documents/PNW_ClassifierAnnotations.csv")
 AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
 
 # Shuffle the DataFrame rows for testing
 #AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
 
-label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
+#label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
 
 
 #%%
@@ -50,7 +52,7 @@ def makePlot(spectrogram, save_path):
     else:
         raise TypeError("Spectrogram should be a NumPy array.")
     plt.figure(figsize=(10, 4))  # Adjust the figure size as needed
-    plt.imshow(np.array(spec), 
+    plt.imshow(np.array(spectrogram), 
                 aspect='auto', 
                 origin='lower', 
                 cmap='viridis')  # Adjust parameters as needed
@@ -63,71 +65,163 @@ def makePlot(spectrogram, save_path):
     plt.close()  # Close the plot to free up memory
 
 
-# # Pull out an example of each of each deploymnet and make the figures
-# dfSub = df_sorted.drop_duplicates(subset = 'Dep')
+# Pull out an example of each of each deploymnet and make the figures
+dfSub = AllAnno.drop_duplicates(subset = 'Soundfile')
 
-# output_dir = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms'
-# #output_dir = 'C:\\Users\\kaity\\Desktop\\Basic'
-# os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
+output_dir_norm_noPECN = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms\\norm_noPECN'
+output_dir_norm_PECN = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms\\norm_PECN'
+output_dir_mel_noPECN = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms\\mel_noPECN'
+output_dir_mel_PECN = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms\\mel_PECN'
 
-# AudioParms = {
-#             'clipDur': 2,
-#             'outSR': 16000,
-#             'nfft': 512,
-#             'hop_length':25,
-#             'spec_type': 'mel',  
-#             'spec_power':2,
-#             'rowNorm': False,
-#             'colNorm': False,
-#             'rmDCoffset': False,
-#             'inSR': None, 
-#             'PCEN': True,
-#             'fmin': 150}
+#output_dir = 'C:\\Users\\kaity\\Desktop\\Basic'
+os.makedirs(output_dir_norm_noPECN, exist_ok=True)  # Create directory if it doesn't exist
+os.makedirs(output_dir_norm_PECN, exist_ok=True)  # Create directory if it doesn't exist
+os.makedirs(output_dir_mel_noPECN, exist_ok=True)  # Create directory if it doesn't exist
+os.makedirs(output_dir_mel_PECN, exist_ok=True)  # Create directory if it doesn't exist
+
+AudioParms_norm_noPECN = {
+            'clipDur': 2,
+            'outSR': 16000,
+            'nfft': 512,
+            'hop_length':25,
+            'spec_type': 'normal',  
+            'spec_power':2,
+            'rowNorm': False,
+            'colNorm': False,
+            'rmDCoffset': False,
+            'inSR': None, 
+            'PCEN': False,
+            'fmin': 150,
+            'returnDB':True}
+
+# Spectrogram parameters
+AudioParms_norm_PECN = {
+    'clipDur': 2,
+    'outSR': 16000,
+    'nfft': 512,
+    'hop_length': 25,
+    'spec_type': 'normal',  
+    'spec_power': 2,
+    'rowNorm': True,
+    'colNorm': True,
+    'rmDCoffset': True,
+    'inSR': None, 
+    'PCEN': True,
+    'fmin': 150,
+    'returnDB':True
+}
+
+# Spectrogram parameters
+AudioParms_mel_noPECN = {
+    'clipDur': 2,
+    'outSR': 16000,
+    'nfft': 512,
+    'hop_length': 25,
+    'spec_type': 'mel',  
+    'spec_power': 2,
+    'rowNorm': True,
+    'colNorm': True,
+    'rmDCoffset': True,
+    'inSR': None, 
+    'PCEN': False,
+    'fmin': 150,
+    'returnDB':True
+}
+
+# Spectrogram parameters
+AudioParms_mel_PECN = {
+    'clipDur': 2,
+    'outSR': 16000,
+    'nfft': 512,
+    'hop_length': 25,
+    'spec_type': 'mel',  
+    'spec_power': 2,
+    'rowNorm': False,
+    'colNorm': False,
+    'rmDCoffset': True,
+    'inSR': None, 
+    'PCEN': True,
+    'fmin': 150,
+    'returnDB':True,
+}
 
 
 
-# for idx, row in dfSub.iterrows():
-#     file_path = row['FilePath']
-#     start_time = row['FileBeginSec']
-#     end_time = row['FileEndSec']
+
+
+for idx, row in dfSub.iterrows():
+    file_path = row['FilePath']
+    start_time = row['FileBeginSec']
+    end_time = row['FileEndSec']
     
-#     # Get the audio data
-#     audio_data, sample_rate = librosa.load(file_path, sr=AudioParms['outSR'], 
-#                                            offset=start_time,
-#                                            duration=AudioParms['clipDur'])
-#     # Create the spectrogram
-#     spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms)
-    
-#     # # spec = PCEN(spec)
-#     # melspec = librosa.feature.melspectrogram(y=audio_data, 
-#     #                                               sr=AudioParms['outSR'], 
-#     #                                               n_fft=AudioParms['nfft'], 
-#     #                                               hop_length=AudioParms['hop_length'],
-#     #                                               fmin =150,
-#     #                                               power =2)
+    # Get the audio data
+    audio_data, sample_rate = librosa.load(file_path, 
+                                           sr=AudioParms_norm_noPECN['outSR'], 
+                                            offset=start_time,
+                                            duration=2)
     
     
-#     # spec =librosa.pcen(
-#     #     melspec * (2 ** 31),
-#     #     time_constant=0.8,
-#     #     eps=1e-6,
-#     #     gain=.08,
-#     #     power=0.25,
-#     #     bias=10,
-#     #     sr=AudioParms['outSR'],
-#     #     hop_length=AudioParms['hop_length'],
-#     # )
+    
+    # Create the spectrogramS
+    spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms_norm_noPECN)
+    base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
+    file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
+    save_path = os.path.join(output_dir_norm_noPECN,file_name)
+    makePlot(spec, save_path)
+    
+    
+    spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms_norm_PECN)
+    base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
+    file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
+    save_path = os.path.join(output_dir_norm_PECN,file_name)
+    makePlot(spec, save_path)
+    
+    
+    spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms_mel_noPECN)
+    base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
+    file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
+    save_path = os.path.join(output_dir_mel_noPECN,file_name)
+    makePlot(spec, save_path)
+    
+    
+    spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms_mel_PECN)
+    base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
+    file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
+    save_path = os.path.join(output_dir_mel_PECN,file_name)
+    makePlot(spec, save_path)
+    
+    # # spec = PCEN(spec)
+    # melspec = librosa.feature.melspectrogram(y=audio_data, 
+    #                                               sr=AudioParms['outSR'], 
+    #                                               n_fft=AudioParms['nfft'], 
+    #                                               hop_length=AudioParms['hop_length'],
+    #                                               fmin =150,
+    #                                               power =2)
+    
+    
+    # spec =librosa.pcen(
+    #     melspec * (2 ** 31),
+    #     time_constant=0.8,
+    #     eps=1e-6,
+    #     gain=.08,
+    #     power=0.25,
+    #     bias=10,
+    #     sr=AudioParms['outSR'],
+    #     hop_length=AudioParms['hop_length'],
+    # )
 
-#     # Generate the file name for the plot
+    # Generate the file name for the plot
 
-#     base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
-#     file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
-#     save_path = os.path.join(output_dir,file_name)
+    # base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
+    # file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
+    # save_path = os.path.join(output_dir,file_name)
     
-#     # Make and save the plot
-#     makePlot(spec, save_path)
+    # Make and save the plot
+    print(idx)
+    
+   
 
-# print("Spectrogram plots saved successfully.")
+    print("Spectrogram plots saved successfully.")
     
     
 #%%  cREATE THE HDF5 dabases
