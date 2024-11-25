@@ -142,7 +142,7 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         'rmDCoffset': True,     # remove DC offset by subtracting mean
         'inSR': None,            # original sample rate of the audio file
         'spec_power':2,
-        'returnDB':False,         # return spectrogram in linear or convert to db 
+        'returnDB':True,         # return spectrogram in linear or convert to db 
         'PCEN':False,             # Per channel energy normalization
         # PCEN parameters
         'PCEN_power':31,
@@ -318,8 +318,17 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     # Load audio segment and downsample to the defined sampling rate
     audio_data, sample_rate = librosa.load(file_path, sr=params['outSR'], 
                                            offset=new_start_time,
-                                           duration=params['clipDur'])
+                                           duration=params['clipDur'],
+                                           mono=False)
+    # Determine the number of channels
+    num_channels = audio_data.shape[0] if audio_data.ndim > 1 else 1
+    
+    # Retain only the first channel if there are multiple
+    if num_channels > 1:
+        print(f"Audio has {num_channels} channels. Retaining only the first channel.")
+        audio_data = audio_data[0]
 
+    
     # Create audio representation
     spec, snr = create_spectrogram(audio_data, return_snr=return_snr, **kwargs)
 
@@ -358,8 +367,8 @@ def create_hdf5_dataset(annotations, hdf5_filename, parms):
         test_group = hf.create_group('test')
 
         # Iterate through annotations and create datasets
-        #for idx, row in annotations.iloc[80816:].iterrows():
-        for idx, row in annotations.iterrows():
+        for idx, row in annotations.iloc[0:].iterrows():
+       # for idx, row in annotations.iterrows():
             file_path = row['FilePath']
             start_time = row['FileBeginSec']
             end_time = row['FileEndSec']
