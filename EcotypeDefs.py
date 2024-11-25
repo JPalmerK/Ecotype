@@ -912,87 +912,161 @@ def compile_model_customWeights(model, class_weights, priorities):
     return model
 
 
-from sklearn.metrics import confusion_matrix
-def batch_conf_matrix(loaded_model, val_batch_loader):
-    # Initialize lists to accumulate predictions and true labels
-    y_pred_accum = []
-    y_true_accum = []
-    
-    # Get the total number of batches
-    total_batches = len(val_batch_loader)
-    
-    # Iterate over test data generator batches
-    for i in range(0, len(val_batch_loader)):
-        batch_data = val_batch_loader.__getitem__(i)
-        
-        # Predict on the current batch
-        batch_pred = loaded_model.predict(batch_data[0])
-        
-        # Convert predictions to class labels
-        batch_pred_labels = np.argmax(batch_pred, axis=1)
-        
-        # Convert true labels to class labels
-        batch_true_labels = np.argmax(batch_data[1], axis=1)
-        
-        # Accumulate predictions and true labels
-        y_pred_accum.extend(batch_pred_labels)
-        y_true_accum.extend(batch_true_labels)
-        
-        # Print progress
-        print(f'Batch {i+1}/{total_batches} processed')
-    
-    # Convert accumulated lists to arrays
-    y_pred_accum = np.array(y_pred_accum)
-    y_true_accum = np.array(y_true_accum)
-    
-    # Compute confusion matrix
-    conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
-    
-    return(conf_matrix)
-    print("Confusion Matrix:")
-    
+from sklearn.metrics import confusion_matrix, accuracy_score
+
 # So this is well and good but I'd like to create be able to look at the timestamps
 # from the predictions so we can do something lie softmax
 
 
-def batch_conf_matrix(loaded_model, val_batch_loader, returnVars = list()):
-    # Initialize lists to accumulate predictions and true labels
+def batch_conf_matrix(loaded_model, val_batch_loader, label_dict):
+    """
+    Computes a confusion matrix with human-readable labels, percentages
+    formatted to two decimal places, and overall accuracy.
+    
+    When you forget how to create the label dictionary here is an example
+    label_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
+
+    Args:
+        loaded_model: The trained model to evaluate.
+        val_batch_loader: The batch loader providing validation data and labels.
+        label_dict: Dictionary mapping numeric labels to human-readable labels.
+
+    Returns:
+        conf_matrix_str: Confusion matrix with human-readable labels as a DataFrame.
+        accuracy: Overall accuracy in percentage.
+        results_df: A DataFrame containing true labels and predicted labels.
+    """
     y_pred_accum = []
     y_true_accum = []
-    
-    # Get the total number of batches
+
     total_batches = len(val_batch_loader)
-    
-    # Iterate over test data generator batches
-    for i in range(0, len(val_batch_loader)):
+
+    for i in range(total_batches):
         batch_data = val_batch_loader.__getitem__(i)
-        
-        # Predict on the current batch
         batch_pred = loaded_model.predict(batch_data[0])
-        
-        # Convert predictions to class labels
         batch_pred_labels = np.argmax(batch_pred, axis=1)
-        
-        # Convert true labels to class labels
-        batch_true_labels = np.argmax(batch_data[1], axis=1)
-        
-        # Accumulate predictions and true labels
+        batch_true_labels = np.array(batch_data[1])
+        batch_true_labels = np.argmax(batch_true_labels, axis=1)
+
         y_pred_accum.extend(batch_pred_labels)
         y_true_accum.extend(batch_true_labels)
-        
-        # Print progress
+
         print(f'Batch {i+1}/{total_batches} processed')
-    
-    # Convert accumulated lists to arrays
+
     y_pred_accum = np.array(y_pred_accum)
     y_true_accum = np.array(y_true_accum)
+
+    # Compute raw confusion matrix
+    conf_matrix_raw = confusion_matrix(y_true_accum, y_pred_accum)
+
+    # Normalize confusion matrix by rows to get percentages
+    conf_matrix_percent = conf_matrix_raw.astype(np.float64)  # Convert to float for division
+    row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)     # Row-wise sums
+    conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100  # Avoid division by zero
+
+    # Map numeric labels to human-readable labels
+    unique_labels = sorted(set(y_true_accum) | set(y_pred_accum))  # All unique labels in validation data
+    human_labels = [label_dict[label] for label in unique_labels]
+
+    # Format confusion matrix to two decimal places
+    conf_matrix_percent_formatted = np.array([[f"{value:.2f}" for value in row] for row in conf_matrix_percent])
+
+    # Create DataFrame with human-readable labels
+    conf_matrix_df = pd.DataFrame(conf_matrix_percent_formatted, index=human_labels, columns=human_labels)
+
+    # Compute overall accuracy
+    accuracy = accuracy_score(y_true_accum, y_pred_accum) 
+
+    # Create a DataFrame for analysis
+    results_df = pd.DataFrame({
+        'True Label': [label_dict[label] for label in y_true_accum],
+        'Predicted Label': [label_dict[label] for label in y_pred_accum]
+    })
+
+    print("Confusion Matrix (Percentages, Two Decimals):")
+    print(conf_matrix_df)
+    print(f"Overall Accuracy: {accuracy:.2f}%")
+
+    return conf_matrix_df, conf_matrix_raw, accuracy, results_df
+
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import numpy as np
+
+def plot_score_distributions(loaded_model, val_batch_loader, label_dict):
+    """
+    Generates paired violin plots of score distributions for true positives (TP) and false positives (FP)
+    for each class in the validation dataset.
+
+    Args:
+        loaded_model: The trained model to evaluate.
+        val_batch_loader: The batch loader providing validation data and labels.
+        label_dict: Dictionary mapping numeric labels to human-readable labels.
     
-    # Compute confusion matrix
-    conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
-    
-    return(conf_matrix)
-    print("Confusion Matrix:")
-    
+    Returns:
+        score_df: A DataFrame with scores and classification information.
+    """
+    # Initialize accumulators
+    y_true_accum = []
+    y_pred_accum = []
+    score_accum = []
+
+    total_batches = len(val_batch_loader)
+    # Iterate through the batches in the validation loader
+    for i in range(len(val_batch_loader)):
+        batch_data = val_batch_loader.__getitem__(i)
+        batch_scores = loaded_model.predict(batch_data[0])  # Raw model outputs (softmax scores)
+        batch_pred_labels = np.argmax(batch_scores, axis=1)
+        batch_true_labels = np.argmax(batch_data[1], axis=1)
+
+        # Accumulate true labels, predicted labels, and scores
+        y_true_accum.extend(batch_true_labels)
+        y_pred_accum.extend(batch_pred_labels)
+        score_accum.extend(batch_scores)
+        print(f'Batch {i+1}/{total_batches} processed')
+
+    # Convert accumulated lists to arrays
+    y_true_accum = np.array(y_true_accum)
+    y_pred_accum = np.array(y_pred_accum)
+    score_accum = np.array(score_accum)
+
+    # Prepare the DataFrame
+    score_data = []
+    for i, true_label in enumerate(y_true_accum):
+        pred_label = y_pred_accum[i]
+        scores = score_accum[i]
+
+        for class_label, score in enumerate(scores):
+            label_type = "True Positive" if (true_label == class_label == pred_label) else "False Positive"
+            score_data.append({
+                "Class": label_dict[class_label],
+                "Score": score,
+                "Type": label_type
+            })
+
+    score_df = pd.DataFrame(score_data)
+
+    # Plot the paired violin plot
+    plt.figure(figsize=(12, 6))
+    sns.violinplot(data=score_df, x="Class", y="Score", hue="Type", split=True, inner="quartile", palette="muted")
+    plt.title("Score Distributions for True Positives and False Positives")
+    plt.xticks(rotation=45)
+    plt.ylabel("Score")
+    plt.xlabel("Class")
+    plt.legend(title="Type")
+    plt.tight_layout()
+    plt.show()
+
+    return score_df
+
+
+
+
+
+
+
 
 
 ###################################################################
