@@ -7,7 +7,16 @@ Created on Fri Jun 21 10:14:13 2024
 This is a trial run of code using the separated audio repreentations. The 
 intention is to produce a full pipeline of audio processing
 
+
+Training data included all datasets
+All frequencies
+KW labels for resident tranisent and offshore only all other labels
+
+
 """
+
+
+
 
 
 import h5py
@@ -149,8 +158,7 @@ model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8kh
 #%%
 
 
-label_to_human_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
-
+label_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
 
 h5_file_validation1 = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Malahat_Balanced_melSpec_8khz_PCEN_RTW.h5'
 model1 = load_model('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_Resnet18_8khz_RTO.keras')
@@ -159,112 +167,15 @@ valLoader1 =  Eco.BatchLoader2(h5_file_validation,
                            trainTest = 'train', batch_size=164,  n_classes=6,  
                            minFreq=0,   return_data_labels = False)
 
-########################################################################
 
-confResults = Eco.batch_conf_matrix(loaded_model = model1, val_batch_loader = valLoader1) 
-                              
+# Instantiate the evaluator
+evaluator = Eco.ModelEvaluator( loaded_model=model1, val_batch_loader = valLoader1, label_dict =label_dict)
 
-########################################################################
+# Run the evaluation (only once)
+evaluator.evaluate_model()
+conf_matrix_df, conf_matrix_raw, accuracy = evaluator.confusion_matrix()
+scoreDF = evaluator.score_distributions()
 
-
-# Now run it with the pipeline
-
-
-
-    # # Load Keras model
-    # model_path = 'C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_SNR.keras'
-    # model = load_model(model_path)
-
-    # # Spectrogram parameters
-    # audio_params = {
-    #     'clipDur': 2,
-    #     'outSR': 16000,
-    #     'nfft': 512,
-    #     'hop_length': 102,
-    #     'spec_type': 'mel',  # Assuming mel spectrogram is used
-    #     'rowNorm': True,
-    #     'colNorm': True,
-    #     'rmDCoffset': True,
-    #     'inSR': None
-    # }
-    
-    # # Example detection thresholds (adjust as needed)
-    # detection_thresholds = {
-    #     0: 0.8,  # Example threshold for class 0
-    #     1: 0.8,  # Example threshold for class 1
-    #     2: 0.9,  # Example threshold for class 2
-    #     3: 0.8,  # Example threshold for class 3
-    #     4: 0.8,  # Example threshold for class 4
-    #     5: 0.8,  # Example threshold for class 5
-    #     6: 0.9   # Example threshold for class 6
-    # }
-    
-    # class_names = {
-    #     0: 'Abiotic',
-    #     1: 'BKW',
-    #     2: 'HW',
-    #     3: 'NRKW',
-    #     4: 'Offshore',
-    #     5: 'SRKW',
-    #     6: 'Und Bio'
-    # }
-    
-    # # Example usage:
-    # folder_path = 'C:\\TempData\\Malahat\\STN3\\20151028'
-    
-    # # Initialize the AudioProcessor with your model and detection thresholds
-    # processor = Eco.AudioProcessor(folder_path=folder_path, model=model,
-    #                            detection_thresholds=detection_thresholds, 
-    #                            class_names=class_names,    
-    #                            params = audio_params,
-    #                            overlap=0.25)
-    
-    # # Process all audio files in the directory
-    # processor.process_all_files()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# # Load the hdf5 file and create a histogram of SNR values from the hdf5
-# hf = h5py.File(h5_file, 'r')
-
-# # Extract all 'SNR' values from 'train' group using list comprehension
-# train_snr_values = np.array([hf['train'][key]['SNR'][()] for key in hf['train']])
-
-# # Close the HDF5 file
-# hf.close()
-
-# # Create histogram using Matplotlib
-# plt.figure(figsize=(10, 6))
-# plt.hist(train_snr_values.flatten(), bins=30, alpha=0.5, label='Train SNR')
-
-# plt.xlabel('SNR Values')
-# plt.ylabel('Frequency')
-# plt.title('Histogram of SNR Values in Train Group')
-# plt.legend()
-
-# plt.grid(True)
-# plt.show()
 
 
 

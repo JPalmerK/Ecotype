@@ -2,16 +2,12 @@
 """
 Created on Wed Jun 12 10:58:40 2024
 
+Script containing functions and methods for building H5 databases,
+building model arechetectur, training and evaluaiton of models
+
+
 @author: kaity
 """
-
-
-# Functions for creating the HDF5 databases
-
-
-################# NO TOUCHIE##################################
-
-
 
 
 import librosa
@@ -24,60 +20,12 @@ import pandas as pd
 import h5py
 from keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Add, Activation
 from keras.models import load_model
-from sklearn.metrics import confusion_matrix
 import keras
 from keras import Model
 from keras.callbacks import EarlyStopping
 import scipy.signal
-import google.cloud.storage
-from io import BytesIO
 import gcsfs
 from tensorflow.keras.callbacks import TensorBoard
-
-
-#%% Testing generators for gs cloud
-
-# import tensorflow as tf
-# import h5py
-# import gcsfs
-
-# # Define GCS file path
-# hdf5_file_path_val = 'gs://dclde2026_hdf5s/hdf5s/MalahatBalanced_melSpec_8khz_PCEN.h5'
-
-# def data_generator(file_path, group_name='train', batch_size=32):
-#     def generator():
-#         fs = gcsfs.GCSFileSystem()
-#         with fs.open(file_path, 'rb') as f:
-#             with h5py.File(f, 'r') as hf:
-#                 group = hf[group_name]
-#                 keys = list(group.keys())
-#                 for i in range(0, len(keys), batch_size):
-#                     batch_keys = keys[i:i + batch_size]
-#                     spectrograms = [group[key]['spectrogram'][()] for key in batch_keys]
-#                     labels = [group[key]['label'][()] for key in batch_keys]
-#                     yield tf.convert_to_tensor(spectrograms, dtype=tf.float32), tf.convert_to_tensor(labels, dtype=tf.int32)
-#     return generator
-
-# # Create a tf.data.Dataset
-# batch_size = 32
-# train_dataset = tf.data.Dataset.from_generator(
-#     Eco.data_generator(hdf5_file_path_val, group_name='train', batch_size=batch_size),
-#     output_signature=(
-#         tf.TensorSpec(shape=(batch_size, None, None), dtype=tf.float32),  # Adjust based on actual shape
-#         tf.TensorSpec(shape=(batch_size,), dtype=tf.int32)
-#     )
-# )
-
-
-#%%
-
-
-
-
-
-
-
-
 
 
 #PCEN
@@ -631,101 +579,6 @@ class BatchLoaderGScloud(keras.utils.Sequence):
         print("HDF5 file closed.")
 
 
-
-# import tensorflow as tf
-# from tensorflow.keras.utils import to_categorical
-
-
-# class BatchLoader3:
-#     def __init__(self, hdf5_file, batch_size=250, trainTest='train',
-#                  shuffle=True, n_classes=7, return_data_labels=False,
-#                  minFreq='nan'):
-#         self.hf = h5py.File(hdf5_file, 'r')
-#         self.batch_size = batch_size
-#         self.trainTest = trainTest
-#         self.shuffle = shuffle
-#         self.n_classes = n_classes
-#         self.return_data_labels = return_data_labels
-#         self.data_keys = list(self.hf[trainTest].keys())
-#         self.num_samples = len(self.data_keys)
-        
-#         # Get the spectrogram size from the first sample
-#         first_key = self.data_keys[0]
-#         self.data = self.hf[trainTest][first_key]['spectrogram']
-#         self.specSize = self.data.shape
-        
-#         # Handle minimum frequency
-#         self.minFreq = minFreq
-#         if math.isfinite(self.minFreq):
-#             mel_frequencies = librosa.core.mel_frequencies(n_mels=self.specSize[0] + 2)
-#             self.minIdx = np.argmax(mel_frequencies >= self.minFreq)
-#             self.specSize = self.data[self.minIdx:, :].shape
-        
-#         if self.shuffle:
-#             np.random.shuffle(self.data_keys)
-
-#     def __len__(self):
-#         return int(np.ceil(self.num_samples / self.batch_size))
-
-#     def generate_dataset(self):
-#         # Create a list of (data, label) tuples
-#         dataset = []
-#         for key in self.data_keys:
-#             spec = self.hf[self.trainTest][key]['spectrogram'][self.minIdx:, :]
-#             label = self.hf[self.trainTest][key]['label'][()]
-#             dataset.append((spec, label))
-
-#         # Shuffle dataset if needed
-#         if self.shuffle:
-#             np.random.shuffle(dataset)
-
-#         # Separate data and labels
-#         data_list, labels_list = zip(*dataset)
-
-#         # Convert lists to numpy arrays
-#         data_array = np.array(data_list)
-#         labels_array = np.array(labels_list)
-
-#         # If returning data and labels, return as tuple
-#         if self.return_data_labels:
-#             return data_array, labels_array
-
-#         # Otherwise, return as TensorFlow Dataset
-#         return tf.data.Dataset.from_tensor_slices((data_array, to_categorical(labels_array, num_classes=self.n_classes)))
-
-# from tensorflow.keras import backend as K
-# def custom_weighted_loss(class_weights, priorities):
-#     """
-#     Custom weighted categorical crossentropy loss function.
-
-#     Parameters:
-#     - class_weights: Dictionary containing weights for each class.
-#     - priorities: List of lists where each sublist represents a group of classes with a priority.
-
-#     Returns:
-#     - loss function to be used in model compilation.
-#     """
-#     def loss(y_true, y_pred):
-#         # Convert class weights to tensor
-#         weights = tf.constant([class_weights[key] for key in sorted(class_weights.keys())], dtype=tf.float32)
-        
-#         # Convert priorities to a tensor
-#         priority_indices = [sorted(class_weights.keys()).index(cls) for priority_group in priorities for cls in priority_group]
-#         priority_mask = K.one_hot(priority_indices, len(class_weights))  # Remove dtype argument
-        
-#         # Calculate cross entropy
-#         y_pred = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())  # Clip to prevent log(0) instability
-#         cross_entropy = -y_true * K.log(y_pred)
-        
-#         # Apply weights and priorities
-#         weighted_cross_entropy = cross_entropy * weights
-#         weighted_cross_entropy *= priority_mask
-        
-#         # Sum over classes and mean over batch
-#         return K.mean(K.sum(weighted_cross_entropy, axis=-1))
-    
-#     return loss
-
 def train_model(model, train_generator, val_generator, epochs, 
                 tensorBoard=False):
     # Define early stopping callback
@@ -863,39 +716,6 @@ def identity_block2(input_tensor, filters):
     
     return x
 
-# def create_det_class_model_with_resnet(input_shape, num_classes_ecotype):
-#     input_layer = Input(shape=input_shape)
-#     x = Conv2D(32, kernel_size=(3, 3), activation='relu')(input_layer)
-#     x = MaxPooling2D(pool_size=(2, 2))(x)
-#     x = Conv2D(64, kernel_size=(3, 3), activation='relu')(x)
-#     x = MaxPooling2D(pool_size=(2, 2))(x)
-    
-#     # Add three identity blocks
-#     x = identity_block(x, 64)
-#     x = identity_block(x, 64)
-#     x = identity_block(x, 64)
-    
-#     x = Flatten()(x)
-#     x = Dense(128, activation='relu')(x)
-    
-#     # Output branch for killer whale detection
-#     output_killer_whale = Dense(1, activation='sigmoid', name='killer_whale')(x)
-    
-#     # Output branch for ecotype classification
-#     output_ecotype = Dense(num_classes_ecotype, activation='softmax', name='ecotype')(x)
-    
-#     model = Model(inputs=input_layer, outputs=[output_killer_whale, output_ecotype])
-    
-#     return model
-
-
-# def compile_det_class_model(model):
-#     model.compile(optimizer='adam',
-#                   loss={'killer_whale': 'binary_crossentropy', 'ecotype': 'categorical_crossentropy'},
-#                   metrics={'killer_whale': 'accuracy', 'ecotype': 'accuracy'})
-#     return model
-
-
 
 # Compile model
 def compile_model(model, loss_val = 'categorical_crossentropy'):
@@ -903,211 +723,6 @@ def compile_model(model, loss_val = 'categorical_crossentropy'):
                   optimizer='adam', 
                   metrics=['accuracy'])
     return model
-
-def compile_model_customWeights(model, class_weights, priorities):
-    # Compile the model with the custom loss function
-    model.compile(optimizer='adam', 
-                  loss=custom_weighted_loss(class_weights, priorities),
-                  metrics=['accuracy'])
-    return model
-
-
-from sklearn.metrics import confusion_matrix, accuracy_score
-
-# So this is well and good but I'd like to create be able to look at the timestamps
-# from the predictions so we can do something lie softmax
-
-
-def batch_conf_matrix(loaded_model, val_batch_loader, label_dict):
-    """
-    Computes a confusion matrix with human-readable labels, percentages
-    formatted to two decimal places, and overall accuracy.
-    
-    When you forget how to create the label dictionary here is an example
-    label_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
-
-    Args:
-        loaded_model: The trained model to evaluate.
-        val_batch_loader: The batch loader providing validation data and labels.
-        label_dict: Dictionary mapping numeric labels to human-readable labels.
-
-    Returns:
-        conf_matrix_str: Confusion matrix with human-readable labels as a DataFrame.
-        accuracy: Overall accuracy in percentage.
-        results_df: A DataFrame containing true labels and predicted labels.
-    """
-    y_pred_accum = []
-    y_true_accum = []
-
-    total_batches = len(val_batch_loader)
-
-    for i in range(total_batches):
-        batch_data = val_batch_loader.__getitem__(i)
-        batch_pred = loaded_model.predict(batch_data[0])
-        batch_pred_labels = np.argmax(batch_pred, axis=1)
-        batch_true_labels = np.array(batch_data[1])
-        batch_true_labels = np.argmax(batch_true_labels, axis=1)
-
-        y_pred_accum.extend(batch_pred_labels)
-        y_true_accum.extend(batch_true_labels)
-
-        print(f'Batch {i+1}/{total_batches} processed')
-
-    y_pred_accum = np.array(y_pred_accum)
-    y_true_accum = np.array(y_true_accum)
-
-    # Compute raw confusion matrix
-    conf_matrix_raw = confusion_matrix(y_true_accum, y_pred_accum)
-
-    # Normalize confusion matrix by rows to get percentages
-    conf_matrix_percent = conf_matrix_raw.astype(np.float64)  # Convert to float for division
-    row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)     # Row-wise sums
-    conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100  # Avoid division by zero
-
-    # Map numeric labels to human-readable labels
-    unique_labels = sorted(set(y_true_accum) | set(y_pred_accum))  # All unique labels in validation data
-    human_labels = [label_dict[label] for label in unique_labels]
-
-    # Format confusion matrix to two decimal places
-    conf_matrix_percent_formatted = np.array([[f"{value:.2f}" for value in row] for row in conf_matrix_percent])
-
-    # Create DataFrame with human-readable labels
-    conf_matrix_df = pd.DataFrame(conf_matrix_percent_formatted, index=human_labels, columns=human_labels)
-
-    # Compute overall accuracy
-    accuracy = accuracy_score(y_true_accum, y_pred_accum) 
-
-    # Create a DataFrame for analysis
-    results_df = pd.DataFrame({
-        'True Label': [label_dict[label] for label in y_true_accum],
-        'Predicted Label': [label_dict[label] for label in y_pred_accum]
-    })
-
-    print("Confusion Matrix (Percentages, Two Decimals):")
-    print(conf_matrix_df)
-    print(f"Overall Accuracy: {accuracy:.2f}%")
-
-    return conf_matrix_df, conf_matrix_raw, accuracy, results_df
-
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import numpy as np
-
-def plot_score_distributions(loaded_model, val_batch_loader, label_dict):
-    """
-    Generates paired violin plots of score distributions for true positives (TP) and false positives (FP)
-    for each class in the validation dataset.
-
-    Args:
-        loaded_model: The trained model to evaluate.
-        val_batch_loader: The batch loader providing validation data and labels.
-        label_dict: Dictionary mapping numeric labels to human-readable labels.
-    
-    Returns:
-        score_df: A DataFrame with scores and classification information.
-    """
-    # Initialize accumulators
-    y_true_accum = []
-    y_pred_accum = []
-    score_accum = []
-
-    total_batches = len(val_batch_loader)
-    # Iterate through the batches in the validation loader
-    for i in range(len(val_batch_loader)):
-        batch_data = val_batch_loader.__getitem__(i)
-        batch_scores = loaded_model.predict(batch_data[0])  # Raw model outputs (softmax scores)
-        batch_pred_labels = np.argmax(batch_scores, axis=1)
-        batch_true_labels = np.argmax(batch_data[1], axis=1)
-
-        # Accumulate true labels, predicted labels, and scores
-        y_true_accum.extend(batch_true_labels)
-        y_pred_accum.extend(batch_pred_labels)
-        score_accum.extend(batch_scores)
-        print(f'Batch {i+1}/{total_batches} processed')
-
-    # Convert accumulated lists to arrays
-    y_true_accum = np.array(y_true_accum)
-    y_pred_accum = np.array(y_pred_accum)
-    score_accum = np.array(score_accum)
-
-    # Prepare the DataFrame
-    score_data = []
-    for i, true_label in enumerate(y_true_accum):
-        pred_label = y_pred_accum[i]
-        scores = score_accum[i]
-
-        for class_label, score in enumerate(scores):
-            label_type = "True Positive" if (true_label == class_label == pred_label) else "False Positive"
-            score_data.append({
-                "Class": label_dict[class_label],
-                "Score": score,
-                "Type": label_type
-            })
-
-    score_df = pd.DataFrame(score_data)
-
-    # Plot the paired violin plot
-    plt.figure(figsize=(12, 6))
-    sns.violinplot(data=score_df, x="Class", y="Score", hue="Type", split=True, inner="quartile", palette="muted")
-    plt.title("Score Distributions for True Positives and False Positives")
-    plt.xticks(rotation=45)
-    plt.ylabel("Score")
-    plt.xlabel("Class")
-    plt.legend(title="Type")
-    plt.tight_layout()
-    plt.show()
-
-    return score_df
-
-
-
-
-
-
-
-
-
-###################################################################
-# Model evaluation
-###################################################################
-
-
-# def confuseionMat(model, val_batch_loader):
-#     # Initialize lists to accumulate predictions and true labels
-#     y_pred_accum = []
-#     y_true_accum = []
-    
-#     # Get the total number of batches
-#     total_batches = len(val_batch_loader)
-    
-    
-#     # Iterate over test data generator batches
-#     for i, (batch_data, batch_labels) in enumerate(val_batch_loader):
-#         # Predict on the current batch
-#         batch_pred = model.predict(batch_data)
-        
-#         # Convert predictions to class labels
-#         batch_pred_labels = np.argmax(batch_pred, axis=1)
-        
-#         # Convert true labels to class labels
-#         batch_true_labels = np.argmax(batch_labels, axis=1)
-        
-#         # Accumulate predictions and true labels
-#         y_pred_accum.extend(batch_pred_labels)
-#         y_true_accum.extend(batch_true_labels)
-        
-#         # Print progress
-#         print(f'Batch {i+1}/{total_batches} processed')
-    
-#     # Convert accumulated lists to arrays
-#     y_pred_accum = np.array(y_pred_accum)
-#     y_true_accum = np.array(y_true_accum)
-    
-#     # Compute confusion matrix
-#     conf_matrix = confusion_matrix(y_true_accum, y_pred_accum)
-#     return conf_matrix
 
 
 #############################################################################
@@ -1195,6 +810,312 @@ def ResNet18(input_shape, num_classes):
 
 
     return model
+
+#########################################################################
+# Model Evaluation Class
+#########################################################################
+
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, accuracy_score
+
+# So this is well and good but I'd like to create be able to look at the timestamps
+# from the predictions so we can do something lie softmax
+
+
+def batch_conf_matrix(loaded_model, val_batch_loader, label_dict):
+    """
+    Computes a confusion matrix with human-readable labels, percentages
+    formatted to two decimal places, and overall accuracy.
+    
+    When you forget how to create the label dictionary here is an example
+    label_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
+
+    Args:
+        loaded_model: The trained model to evaluate.
+        val_batch_loader: The batch loader providing validation data and labels.
+        label_dict: Dictionary mapping numeric labels to human-readable labels.
+
+    Returns:
+        conf_matrix_str: Confusion matrix with human-readable labels as a DataFrame.
+        accuracy: Overall accuracy in percentage.
+        results_df: A DataFrame containing true labels and predicted labels.
+    """
+    y_pred_accum = []
+    y_true_accum = []
+
+    total_batches = len(val_batch_loader)
+
+    for i in range(total_batches):
+        batch_data = val_batch_loader.__getitem__(i)
+        batch_pred = loaded_model.predict(batch_data[0])
+        batch_pred_labels = np.argmax(batch_pred, axis=1)
+        batch_true_labels = np.array(batch_data[1])
+        batch_true_labels = np.argmax(batch_true_labels, axis=1)
+
+        y_pred_accum.extend(batch_pred_labels)
+        y_true_accum.extend(batch_true_labels)
+
+        print(f'Batch {i+1}/{total_batches} processed')
+
+    y_pred_accum = np.array(y_pred_accum)
+    y_true_accum = np.array(y_true_accum)
+
+    # Compute raw confusion matrix
+    conf_matrix_raw = confusion_matrix(y_true_accum, y_pred_accum)
+
+    # Normalize confusion matrix by rows to get percentages
+    conf_matrix_percent = conf_matrix_raw.astype(np.float64)  # Convert to float for division
+    row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)     # Row-wise sums
+    conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100  # Avoid division by zero
+
+    # Map numeric labels to human-readable labels
+    unique_labels = sorted(set(y_true_accum) | set(y_pred_accum))  # All unique labels in validation data
+    human_labels = [label_dict[label] for label in unique_labels]
+
+    # Format confusion matrix to two decimal places
+    conf_matrix_percent_formatted = np.array([[f"{value:.2f}" for value in row] 
+                                              for row in conf_matrix_percent])
+
+    # Create DataFrame with human-readable labels
+    conf_matrix_df = pd.DataFrame(conf_matrix_percent_formatted, 
+                                  index=human_labels, columns=human_labels)
+
+    # Compute overall accuracy
+    accuracy = accuracy_score(y_true_accum, y_pred_accum) 
+
+    # Create a DataFrame for analysis
+    results_df = pd.DataFrame({
+        'True Label': [label_dict[label] for label in y_true_accum],
+        'Predicted Label': [label_dict[label] for label in y_pred_accum]
+    })
+
+    print("Confusion Matrix (Percentages, Two Decimals):")
+    print(conf_matrix_df)
+    print(f"Overall Accuracy: {accuracy:.2f}%")
+
+    return conf_matrix_df, conf_matrix_raw, accuracy, results_df
+
+
+
+def plot_score_distributions(loaded_model, val_batch_loader, label_dict):
+    """
+    Generates paired violin plots of score distributions for true positives (TP) and false positives (FP)
+    for each class in the validation dataset.
+
+    Args:
+        loaded_model: The trained model to evaluate.
+        val_batch_loader: The batch loader providing validation data and labels.
+        label_dict: Dictionary mapping numeric labels to human-readable labels.
+    
+    Returns:
+        score_df: A DataFrame with scores and classification information.
+    """
+    # Initialize accumulators
+    y_true_accum = []
+    y_pred_accum = []
+    score_accum = []
+
+    total_batches = len(val_batch_loader)
+    # Iterate through the batches in the validation loader
+    for i in range(len(val_batch_loader)):
+        batch_data = val_batch_loader.__getitem__(i)
+        batch_scores = loaded_model.predict(batch_data[0])  # Raw model outputs (softmax scores)
+        batch_pred_labels = np.argmax(batch_scores, axis=1)
+        batch_true_labels = np.argmax(batch_data[1], axis=1)
+
+        # Accumulate true labels, predicted labels, and scores
+        y_true_accum.extend(batch_true_labels)
+        y_pred_accum.extend(batch_pred_labels)
+        score_accum.extend(batch_scores)
+        print(f'Batch {i+1}/{total_batches} processed')
+
+    # Convert accumulated lists to arrays
+    y_true_accum = np.array(y_true_accum)
+    y_pred_accum = np.array(y_pred_accum)
+    score_accum = np.array(score_accum)
+
+    # Prepare the DataFrame
+    score_data = []
+    for i, true_label in enumerate(y_true_accum):
+        pred_label = y_pred_accum[i]
+        scores = score_accum[i]
+
+        for class_label, score in enumerate(scores):
+            label_type = "True Positive" if (true_label == class_label == pred_label) else "False Positive"
+            score_data.append({
+                "Class": label_dict[class_label],
+                "Score": score,
+                "Type": label_type
+            })
+
+    score_df = pd.DataFrame(score_data)
+
+    # Plot the paired violin plot
+    plt.figure(figsize=(12, 6))
+    sns.violinplot(data=score_df, x="Class", y="Score", hue="Type", split=True, inner="quartile", palette="muted")
+    plt.title("Score Distributions for True Positives and False Positives")
+    plt.xticks(rotation=45)
+    plt.ylabel("Score")
+    plt.xlabel("Class")
+    plt.legend(title="Type")
+    plt.tight_layout()
+    plt.show()
+
+    return score_df
+
+
+
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+class ModelEvaluator:
+    def __init__(self, loaded_model, val_batch_loader, label_dict):
+        """
+        Class to evaluate the trained model on the validataion H5 file
+        Initialize the ModelEvaluator object.
+
+        Args:
+            loaded_model: The trained keras model to evaluate.
+            val_batch_loader: The batch loader providing validation data and labels.
+            label_dict: Dictionary mapping numeric labels to human-readable labels.
+        """
+        self.model = loaded_model
+        self.val_batch_loader = val_batch_loader
+        self.label_dict = label_dict
+        self.y_true_accum = []
+        self.y_pred_accum = []
+        self.score_accum = []
+
+    def evaluate_model(self):
+        """Runs the model on the validation data and stores predictions and scores."""
+        total_batches = len(self.val_batch_loader)
+        for i in range(total_batches):
+            batch_data = self.val_batch_loader.__getitem__(i)
+            batch_scores = self.model.predict(batch_data[0])  # Model outputs (softmax scores)
+            batch_pred_labels = np.argmax(batch_scores, axis=1)
+            batch_true_labels = np.argmax(batch_data[1], axis=1)
+
+            # Accumulate true labels, predicted labels, and scores
+            self.y_true_accum.extend(batch_true_labels)
+            self.y_pred_accum.extend(batch_pred_labels)
+            self.score_accum.extend(batch_scores)
+
+            print(f'Batch {i+1}/{total_batches} processed')
+
+        self.y_true_accum = np.array(self.y_true_accum)
+        self.y_pred_accum = np.array(self.y_pred_accum)
+        self.score_accum = np.array(self.score_accum)
+
+    def confusion_matrix(self):
+        """Computes a confusion matrix with human-readable labels and accuracy."""
+        conf_matrix_raw = confusion_matrix(self.y_true_accum, self.y_pred_accum)
+
+        # Normalize confusion matrix by rows
+        conf_matrix_percent = conf_matrix_raw.astype(np.float64)
+        row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)
+        conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100
+
+        # Map numeric labels to human-readable labels
+        unique_labels = sorted(set(self.y_true_accum) | set(self.y_pred_accum))
+        human_labels = [self.label_dict[label] for label in unique_labels]
+
+        # Format confusion matrix to two decimal places
+        conf_matrix_percent_formatted = np.array([[f"{value:.2f}" for value in row]
+                                                  for row in conf_matrix_percent])
+
+        # Create DataFrame
+        conf_matrix_df = pd.DataFrame(conf_matrix_percent_formatted, index=human_labels, columns=human_labels)
+
+        # Compute overall accuracy
+        accuracy = accuracy_score(self.y_true_accum, self.y_pred_accum)
+
+        return conf_matrix_df, conf_matrix_raw, accuracy
+
+    def score_distributions(self):
+        """Generates a DataFrame of score distributions for true positives and false positives."""
+        score_data = []
+        for i, true_label in enumerate(self.y_true_accum):
+            pred_label = self.y_pred_accum[i]
+            scores = self.score_accum[i]
+
+            for class_label, score in enumerate(scores):
+                label_type = "True Positive" if (true_label == class_label == pred_label) else "False Positive"
+                score_data.append({
+                    "Class": self.label_dict[class_label],
+                    "Score": score,
+                    "Type": label_type
+                })
+
+        score_df = pd.DataFrame(score_data)
+
+        # Plot paired violin plot
+        plt.figure(figsize=(12, 6))
+        sns.violinplot(data=score_df, x="Class", y="Score", hue="Type", split=True, inner="quartile", palette="muted")
+        plt.title("Score Distributions for True Positives and False Positives")
+        plt.xticks(rotation=45)
+        plt.ylabel("Score")
+        plt.xlabel("Class")
+        plt.legend(title="Type")
+        plt.tight_layout()
+        plt.show()
+
+        return score_df
+    def precision_recall_curves(self):
+        """Computes and plots precision-recall curves for all classes."""
+        num_classes = self.score_accum.shape[1]
+        precision_recall_data = {}
+    
+        plt.figure(figsize=(10, 8))
+    
+        # Calculate PR curves for each class
+        for class_idx in range(num_classes):
+            # Check if the class is present in the dataset
+            class_present = (self.y_true_accum == class_idx).any()
+    
+            if not class_present:
+                print(f"Class {self.label_dict[class_idx]} is not present in the validation dataset.")
+                # Store empty results for missing class
+                precision_recall_data[self.label_dict[class_idx]] = {
+                    "precision": None,
+                    "recall": None,
+                    "average_precision": None
+                }
+                continue
+    
+            # Binarize true labels for the current class
+            true_binary = (self.y_true_accum == class_idx).astype(int)
+    
+            # Retrieve scores for the current class
+            class_scores = self.score_accum[:, class_idx]
+    
+            # Compute precision, recall, and average precision score
+            precision, recall, _ = precision_recall_curve(true_binary, class_scores)
+            avg_precision = average_precision_score(true_binary, class_scores)
+    
+            # Store the data
+            precision_recall_data[self.label_dict[class_idx]] = {
+                "precision": precision,
+                "recall": recall,
+                "average_precision": avg_precision
+            }
+    
+            # Plot PR curve
+            plt.plot(recall, precision, label=f"{self.label_dict[class_idx]} (AP={avg_precision:.2f})")
+    
+        # Finalize plot
+        plt.title("Precision-Recall Curves")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.legend(loc="best")
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
+    
+        return precision_recall_data
+
+
+
+
+
 #########################################################################
 #Pipeline for producing streaming detections
 ##########################################################################
