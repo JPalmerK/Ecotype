@@ -1678,6 +1678,119 @@ class AudioProcessor3:
 
 
 
+class AudioProcessor4:
+    def __init__(self, folder_path=None, segment_duration=2.0, overlap=1.0, 
+                 params=None, model=None, detection_thresholds=None,
+                 selection_table_name="detections.txt", class_names=None,
+                 table_type="selection"):
+        self.folder_path = folder_path
+        self.audio_files = self.find_audio_files(folder_path) if folder_path else []
+        self.segment_duration = segment_duration
+        self.overlap = overlap
+        self.params = params if params else {
+            'outSR': 16000,
+            'clipDur': segment_duration,
+            'nfft': 512,
+            'hop_length': 3200,
+            'spec_type': 'mel',
+            'rowNorm': True,
+            'colNorm': True,
+            'rmDCoffset': True,
+            'inSR': None
+        }
+        self.model = model
+        self.model_input_shape = model.input_shape[1:] if model else None
+        
+        self.detection_thresholds = detection_thresholds if detection_thresholds else {
+            class_id: 0.5 for class_id in range(7)
+        }
+        self.class_names = class_names if class_names else {
+            0: 'Abiotic',
+            1: 'BKW',
+            2: 'HW',
+            3: 'NRKW',
+            4: 'Offshore',
+            5: 'SRKW',
+            6: 'Und Bio',
+        }
+        self.selection_table_name = selection_table_name
+        self.table_type = table_type
+        self.init_selection_table()
+        self.detection_counter = 0
+
+    def find_audio_files(self, folder_path):
+        return [os.path.join(root, file)
+                for root, _, files in os.walk(folder_path)
+                for file in files if file.endswith(('.wav', '.mp3', '.flac', '.ogg'))]
+
+    def init_selection_table(self):
+        with open(self.selection_table_name, 'w') as f:
+            if self.table_type == "selection":
+                f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tLow Freq (Hz)\tHigh Freq (Hz)\tClass\tScore\n")
+            elif self.table_type == "sound":
+                f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tLow Freq (Hz)\tHigh Freq (Hz)\tClass\tScore\tSound\n")
+
+    def load_audio(self, filename):
+        y, sr = sf.read(filename, dtype='float32')
+        self.params['inSR'] = sr
+        return y, sr
+
+    def create_segments(self, y, sr):
+        segment_length = int(self.segment_duration * sr)
+        overlap_length = int(self.overlap * sr)
+        start_time = 0.0
+
+        for start in range(0, len(y) - segment_length + 1, segment_length - overlap_length):
+            yield y[start:start + segment_length], start_time
+            start_time += (segment_length - overlap_length) / sr
+
+    def create_spectrogram(self, y):
+        expected_time_steps = self.model_input_shape[1] if self.model_input_shape else None
+        spectrogram = create_spectrogram(y, return_snr=False, **self.params)
+        if expected_time_steps and spectrogram.shape[1] < expected_time_steps:
+            spectrogram = np.pad(spectrogram, 
+                                 ((0, 0), 
+                                  (0, expected_time_steps - spectrogram.shape[1])), 
+                                 ymode='constant')
+        elif expected_time_steps and spectrogram.shape[1] > expected_time_steps:
+            spectrogram = spectrogram[:, :expected_time_steps]
+        return spectrogram
+
+    def process_segment(self, segment, sr, start_time, filename, filestreamStart):
+        spectrogram = self.create_spectrogram(segment)
+        spectrogram = np.expand_dims(spectrogram, axis=0)  # Add batch dimension
+        predictions = self.model.predict(spectrogram)[0]  # Assuming batch size 1
+
+        for class_id, score in enumerate(predictions):
+            if score >= self.detection_thresholds[class_id]:
+                self.output_detection(class_id, score, 
+                                      start_time+filestreamStart, 
+                                      start_time + self.segment_duration+filestreamStart,
+                                      filename)
+
+    def output_detection(self, class_id, score, start_time, end_time, filename):
+        self.detection_counter += 1
+        with open(self.selection_table_name, 'a') as f:
+            selection = self.detection_counter
+            class_name = self.class_names[class_id]
+            if self.table_type == "selection":
+                f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\n")
+            elif self.table_type == "sound":
+                f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\t{filename}\n")
+
+    def process_all_files(self):
+        filestreamStart = 0
+        for filename in self.audio_files:
+            print(f"Processing file: {filename}")
+            y, sr = self.load_audio(filename)
+            
+            for segment, start_time in self.create_segments(y, sr):
+                self.process_segment(segment, sr, start_time, filename, filestreamStart)
+            
+            filestreamStart = filestreamStart+len(y)/sr
+
+
+    
 if __name__ == "__main__":
     
     # Example how to call
