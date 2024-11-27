@@ -54,7 +54,7 @@ def makePlot(spectrogram, save_path):
     else:
         raise TypeError("Spectrogram should be a NumPy array.")
     plt.figure(figsize=(10, 4))  # Adjust the figure size as needed
-    plt.imshow(np.array(spec), 
+    plt.imshow(np.array(spectrogram), 
                 aspect='auto', 
                 origin='lower', 
                 cmap='viridis')  # Adjust parameters as needed
@@ -125,26 +125,6 @@ valLoader =  Eco.BatchLoader2(h5_file_validation,
 trainLoader.specSize
 num_classes =6
 input_shape = (128, 94, 1)
-#%% Check generators
-
-# for batch in trainLoader:
-#     print(f"Batch: {batch}")  # Inspect what `batch` contains
-#     if batch is None:
-#         print("Found None in trainLoader")
-#     else:
-#         # Check the type of `batch` and its length
-#         print(f"Type of batch: {type(batch)}")
-#         print(f"Length of batch: {len(batch)}")
-
-#         # Ensure it is unpackable into `x` and `y`
-#         if isinstance(batch, tuple) and len(batch) == 2:
-#             x, y = batch
-#             if x is None or y is None:
-#                 print("Found None in batch")
-#         else:
-#             print("Batch format is incorrect")
-
-
 
 #%% Train the detector
 
@@ -173,8 +153,12 @@ evaluator = Eco.ModelEvaluator( loaded_model=model1, val_batch_loader = valLoade
 
 # Run the evaluation (only once)
 evaluator.evaluate_model()
+
+# Get the various outputs for model checking
 conf_matrix_df, conf_matrix_raw, accuracy = evaluator.confusion_matrix()
 scoreDF = evaluator.score_distributions()
+pr_curves = evaluator.precision_recall_curves()
+
 
 
 
