@@ -28,33 +28,6 @@ import gcsfs
 from tensorflow.keras.callbacks import TensorBoard
 
 
-#PCEN
-def PCEN(spectrogram, alpha =0.5, delta=2, r=0.5, eps =1e-6):
-    spectrogram= librosa.db_to_power(spectrogram)
-
-    # # Compute PCEN parameters
-    # alpha = 0.5
-    # delta = 2
-    # r = .5
-    # eps = 1e-6
-    
-    # Compute the power spectrogram smoothed by a short-term averaging filter
-    smooth_power_spectrogram = scipy.signal.lfilter([alpha],
-                                                    [1, -alpha], 
-                                                    spectrogram, axis=1)
-    # Compute the gain control filter
-    gain_control = np.maximum(eps, smooth_power_spectrogram / 
-                              (smooth_power_spectrogram + delta * 
-                               np.mean(smooth_power_spectrogram,
-                                       axis=1, keepdims=True)))
-    
-    # Apply the gain control filter to the original power spectrogram
-    pcen = (spectrogram ** r) * gain_control - eps
-    spectrogram = librosa.power_to_db(pcen, ref=np.max)
-    return(spectrogram)
-
-
-
 def create_spectrogram(audio, return_snr=False,**kwargs):
     """
     Create the audio representation.
@@ -92,7 +65,6 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         'spec_power':2,
         'returnDB':True,         # return spectrogram in linear or convert to db 
         'PCEN':False,             # Per channel energy normalization
-        # PCEN parameters
         'PCEN_power':31,
         'time_constant':.8,
         'eps':1e-6,
@@ -152,8 +124,6 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
                                                      hop_length=params['hop_length'],
                                                      fmin =params['fmin'],
                                                      power =params['spec_power'])
-        
-
         
         # PCEN
         if params['PCEN']==True:
@@ -244,7 +214,7 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     file_duration = librosa.get_duration(path=file_path)
     
     # Calculate the duration of the desired audio segment
-    duration = end_time - start_time
+    #duration = end_time - start_time
     
     # Calculate the center time of the desired clip
     center_time = (start_time + end_time) / 2.0
@@ -361,13 +331,13 @@ def create_clip_folder(annotations, fileOutLoc, parms):
         file_path = row['FilePath']
         start_time = row['FileBeginSec']
         end_time = row['FileEndSec']
-        label = row['label']
-        traintest = row['traintest']
-        dep = row['Dep']
-        provider = row['Provider']
-        kw = row['KW']
-        kwCertin = row['KW_certain']
-        utc = row['UTC']
+        #label = row['label']
+        #traintest = row['traintest']
+        #dep = row['Dep']
+        #provider = row['Provider']
+        #kw = row['KW']
+        #kwCertin = row['KW_certain']
+        #utc = row['UTC']
 
         # Load and process audio segment
         spec, SNR = load_and_process_audio_segment(file_path, start_time, 
@@ -375,11 +345,7 @@ def create_clip_folder(annotations, fileOutLoc, parms):
                                                    **parms)    
 
 
-
-
-import h5py
 import librosa
-import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Define your functions load_and_process_audio_segment() and create_hdf5_dataset() here
@@ -728,9 +694,8 @@ def compile_model(model, loss_val = 'categorical_crossentropy'):
 #############################################################################
 # Bigger resenet
 #############################################################################
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Conv2D, BatchNormalization, MaxPooling2D, Dropout
-from tensorflow.keras.layers import Add, ReLU, AveragePooling2D, Flatten, Dense
+from tensorflow.keras.layers import BatchNormalization, Dropout
+from tensorflow.keras.layers import  ReLU
 
 
 def ConvBlock(inputs, filters, kernel_size, strides=(1, 1), padding='same'):
@@ -822,148 +787,6 @@ from sklearn.metrics import confusion_matrix, accuracy_score
 # from the predictions so we can do something lie softmax
 
 
-def batch_conf_matrix(loaded_model, val_batch_loader, label_dict):
-    """
-    Computes a confusion matrix with human-readable labels, percentages
-    formatted to two decimal places, and overall accuracy.
-    
-    When you forget how to create the label dictionary here is an example
-    label_dict = dict(zip(AllAnno['label'], AllAnno['Labels']))
-
-    Args:
-        loaded_model: The trained model to evaluate.
-        val_batch_loader: The batch loader providing validation data and labels.
-        label_dict: Dictionary mapping numeric labels to human-readable labels.
-
-    Returns:
-        conf_matrix_str: Confusion matrix with human-readable labels as a DataFrame.
-        accuracy: Overall accuracy in percentage.
-        results_df: A DataFrame containing true labels and predicted labels.
-    """
-    y_pred_accum = []
-    y_true_accum = []
-
-    total_batches = len(val_batch_loader)
-
-    for i in range(total_batches):
-        batch_data = val_batch_loader.__getitem__(i)
-        batch_pred = loaded_model.predict(batch_data[0])
-        batch_pred_labels = np.argmax(batch_pred, axis=1)
-        batch_true_labels = np.array(batch_data[1])
-        batch_true_labels = np.argmax(batch_true_labels, axis=1)
-
-        y_pred_accum.extend(batch_pred_labels)
-        y_true_accum.extend(batch_true_labels)
-
-        print(f'Batch {i+1}/{total_batches} processed')
-
-    y_pred_accum = np.array(y_pred_accum)
-    y_true_accum = np.array(y_true_accum)
-
-    # Compute raw confusion matrix
-    conf_matrix_raw = confusion_matrix(y_true_accum, y_pred_accum)
-
-    # Normalize confusion matrix by rows to get percentages
-    conf_matrix_percent = conf_matrix_raw.astype(np.float64)  # Convert to float for division
-    row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)     # Row-wise sums
-    conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100  # Avoid division by zero
-
-    # Map numeric labels to human-readable labels
-    unique_labels = sorted(set(y_true_accum) | set(y_pred_accum))  # All unique labels in validation data
-    human_labels = [label_dict[label] for label in unique_labels]
-
-    # Format confusion matrix to two decimal places
-    conf_matrix_percent_formatted = np.array([[f"{value:.2f}" for value in row] 
-                                              for row in conf_matrix_percent])
-
-    # Create DataFrame with human-readable labels
-    conf_matrix_df = pd.DataFrame(conf_matrix_percent_formatted, 
-                                  index=human_labels, columns=human_labels)
-
-    # Compute overall accuracy
-    accuracy = accuracy_score(y_true_accum, y_pred_accum) 
-
-    # Create a DataFrame for analysis
-    results_df = pd.DataFrame({
-        'True Label': [label_dict[label] for label in y_true_accum],
-        'Predicted Label': [label_dict[label] for label in y_pred_accum]
-    })
-
-    print("Confusion Matrix (Percentages, Two Decimals):")
-    print(conf_matrix_df)
-    print(f"Overall Accuracy: {accuracy:.2f}%")
-
-    return conf_matrix_df, conf_matrix_raw, accuracy, results_df
-
-
-
-def plot_score_distributions(loaded_model, val_batch_loader, label_dict):
-    """
-    Generates paired violin plots of score distributions for true positives (TP) and false positives (FP)
-    for each class in the validation dataset.
-
-    Args:
-        loaded_model: The trained model to evaluate.
-        val_batch_loader: The batch loader providing validation data and labels.
-        label_dict: Dictionary mapping numeric labels to human-readable labels.
-    
-    Returns:
-        score_df: A DataFrame with scores and classification information.
-    """
-    # Initialize accumulators
-    y_true_accum = []
-    y_pred_accum = []
-    score_accum = []
-
-    total_batches = len(val_batch_loader)
-    # Iterate through the batches in the validation loader
-    for i in range(len(val_batch_loader)):
-        batch_data = val_batch_loader.__getitem__(i)
-        batch_scores = loaded_model.predict(batch_data[0])  # Raw model outputs (softmax scores)
-        batch_pred_labels = np.argmax(batch_scores, axis=1)
-        batch_true_labels = np.argmax(batch_data[1], axis=1)
-
-        # Accumulate true labels, predicted labels, and scores
-        y_true_accum.extend(batch_true_labels)
-        y_pred_accum.extend(batch_pred_labels)
-        score_accum.extend(batch_scores)
-        print(f'Batch {i+1}/{total_batches} processed')
-
-    # Convert accumulated lists to arrays
-    y_true_accum = np.array(y_true_accum)
-    y_pred_accum = np.array(y_pred_accum)
-    score_accum = np.array(score_accum)
-
-    # Prepare the DataFrame
-    score_data = []
-    for i, true_label in enumerate(y_true_accum):
-        pred_label = y_pred_accum[i]
-        scores = score_accum[i]
-
-        for class_label, score in enumerate(scores):
-            label_type = "True Positive" if (true_label == class_label == pred_label) else "False Positive"
-            score_data.append({
-                "Class": label_dict[class_label],
-                "Score": score,
-                "Type": label_type
-            })
-
-    score_df = pd.DataFrame(score_data)
-
-    # Plot the paired violin plot
-    plt.figure(figsize=(12, 6))
-    sns.violinplot(data=score_df, x="Class", y="Score", hue="Type", split=True, inner="quartile", palette="muted")
-    plt.title("Score Distributions for True Positives and False Positives")
-    plt.xticks(rotation=45)
-    plt.ylabel("Score")
-    plt.xlabel("Class")
-    plt.legend(title="Type")
-    plt.tight_layout()
-    plt.show()
-
-    return score_df
-
-
 
 from sklearn.metrics import precision_recall_curve, average_precision_score
 
@@ -972,11 +795,31 @@ class ModelEvaluator:
         """
         Class to evaluate the trained model on the validataion H5 file
         Initialize the ModelEvaluator object.
+        
+        Parameters
+        ----------
+            loaded_model : keras model
+            The trained keras model to evaluate
+            
+            val_batch_loader : object
+            Batch loader to feed spectrograms from the H5 model to the kerask 
+            model for prediction. See BatchLoader2 method in EcotypeDefs
 
-        Args:
-            loaded_model: The trained keras model to evaluate.
-            val_batch_loader: The batch loader providing validation data and labels.
-            label_dict: Dictionary mapping numeric labels to human-readable labels.
+            label_dict: dictionary
+            Dictionary mapping numeric labels used to train the model to 
+            to human-readable labels. This should contain all labels in the
+            origional training dataset E.g. 
+            label_dict = dict(zip(annot_test['label'], annot_test['Labels']))
+            
+        Methods
+        -------
+        evaluate_model()
+            Creates model predictions for all evaluation methods. Run first.
+        confusion_matrix()
+            Creates confusion matrix based on predicted scores and labels. 
+        score_distributions()
+            Creates violin plots of score distributions for true and false
+            positive predictions
         """
         self.model = loaded_model
         self.val_batch_loader = val_batch_loader
