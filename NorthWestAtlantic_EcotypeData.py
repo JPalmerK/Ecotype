@@ -19,18 +19,23 @@ from keras.models import load_model
 import librosa
 import os
 
+np.random.seed(seed=2)
 
 # New more balanced train/test dataset so load that then create the HDF5 database
-annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain2_Edrive.csv")
-annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest2_Edrive.csv")
+# annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain2_Edrive.csv")
+# annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest2_Edrive.csv")
 
-AllAnno = pd.concat([annot_train, annot_val], axis=0)
+# New more balanced train/test dataset so load that then create the HDF5 database
+annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/RTO_train.csv")
+annot_test = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/RTO_test.csv")
+annot_val = pd.read_csv('C:/Users/kaity/Documents/GitHub/Ecotype/RTO_malahat.csv')
+
+
+AllAnno = pd.concat([annot_train, annot_test], axis=0)
 AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
 
-# Shuffle the DataFrame rows for testing
-#AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
-
-label_mapping_traintest = AllAnno[['label', 'Labels']].drop_duplicates()
+# Shuffle the DataFrame rows for debugging
+AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
 
 
 # Function to create and save a spectrogram plot
@@ -54,19 +59,13 @@ def makePlot(spectrogram, save_path):
 
     
     
-#%%
-
-
-# Exclude any audio files from JASCO that have 'HF' in tehm
-# Exclude any data with HPF
-AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
-AllAnno = AllAnno[~AllAnno['Soundfile'].str.contains('HPF.wav')]
+#%% Test the parameters by making example spectrograms
 
 
 # Set up audio parameters
 AudioParms = {
-            'clipDur': 2,
-            'outSR': 16000,
+            'clipDur': 3,
+            'outSR': 8000,
             'nfft': 512,
             'hop_length':256,
             'spec_type': 'mel',  
@@ -76,58 +75,25 @@ AudioParms = {
             'rmDCoffset': False,
             'inSR': None, 
             'PCEN': True,
-            'fmin': 150}
+            'fmin': 0}
 
 
 
-# Pull out an example of each of each deploymnet and make the figures
-dfSub = AllAnno.drop_duplicates(subset = 'Dep')
 
-output_dir = 'C:\\Users\\kaity\\Desktop\\TestSpectrograms'
-#output_dir = 'C:\\Users\\kaity\\Desktop\\Basic'
-os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
+#%% Make the HDF5 files for training testing and evaluation
 
 
-
-for idx, row in dfSub.iterrows():
-    file_path = row['FilePath']
-    start_time = row['FileBeginSec']
-    end_time = row['FileEndSec']
-    
-    # Get the audio data
-    audio_data, sample_rate = librosa.load(file_path, sr=AudioParms['outSR'], 
-                                            offset=start_time,
-                                            duration=AudioParms['clipDur'])
-    # Create the spectrogram
-    spec = Eco.create_spectrogram(audio_data, return_snr=False, **AudioParms)
-    
-
-
-    # Generate the file name for the plot
-
-    base_name = os.path.splitext(os.path.basename(row['Soundfile']))[0]  # Remove extension
-    file_name = f'spectrogram_{base_name}.png'  # Or .jpg if you prefer
-    save_path = os.path.join(output_dir,file_name)
-    
-    # Make and save the plot
-    makePlot(spec, save_path)
-
-print("Spectrogram plots saved successfully.")
-
-#%%
-
-
-h5_fileTrainTest = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Balanced_melSpec_8khz_SNR_PCEN_round.h5'
-Eco.create_hdf5_dataset(annotations=AllAnno, hdf5_filename= h5_fileTrainTest, parms=AudioParms)
+h5_fileTrainTest = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Balanced_melSpec_8khz_PCEN_RTW.h5'
+Eco.create_hdf5_dataset(annotations=AllAnno, hdf5_filename= h5_fileTrainTest, 
+                        parms=AudioParms)
 
 
 # Create the database for the the validation data
-annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/Malahat2.csv")
-annot_val = annot_val[annot_val['LowFreqHz'] < 8000]
-
-h5_file_validation = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\MalahatBalanced_melSpec_8khz_PCEN_round.h5'
+annot_val['traintest'] = 'Train'
+h5_file_validation = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Malahat_Balanced_melSpec_8khz_PCEN_RTW.h5'
 Eco.create_hdf5_dataset(annotations=annot_val,
-                        hdf5_filename= h5_file_validation, parms = AudioParms)
+                        hdf5_filename= h5_file_validation, 
+                        parms = AudioParms)
 
 
 #%%
@@ -135,21 +101,21 @@ Eco.create_hdf5_dataset(annotations=annot_val,
 
 # Create the batch loader which will report the size
 trainLoader =  Eco.BatchLoader2(h5_fileTrainTest, 
-                           trainTest = 'train', batch_size=164,  n_classes=7,  
+                           trainTest = 'train', batch_size=164,  n_classes=6,  
                            minFreq=0)
 
 testLoader =  Eco.BatchLoader2(h5_fileTrainTest, 
-                           trainTest = 'test', batch_size=164,  n_classes=7,  
+                           trainTest = 'test', batch_size=164,  n_classes=6,  
                            minFreq=0)
 
 valLoader =  Eco.BatchLoader2(h5_file_validation, 
-                           trainTest = 'train', batch_size=164,  n_classes=7,  
+                           trainTest = 'train', batch_size=164,  n_classes=6,  
                            minFreq=0)
 
 # get the data size
 trainLoader.specSize
-num_classes =7
-input_shape = (128, 1281, 1)
+num_classes =6
+input_shape = (128, 94, 1)
 #%% Check generators
 
 for batch in trainLoader:
@@ -171,13 +137,20 @@ for batch in trainLoader:
 
 
 
-#%%
+#%% Train the detector
+
+
+
+h5_fileTrainTest = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Balanced_melSpec_8khz_PCEN_RTW.h5'
+h5_file_validation = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\MalahatBalanced_melSpec_8khz_PCEN_RTW.h5'
+
+
 
 # Create, compile, and train model
 model = Eco.ResNet18(input_shape, num_classes)
 model = Eco.compile_model(model)
-Eco.train_model(model, trainLoader, testLoader, epochs=1)
-model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_Resnet18_PCEN.keras')
+Eco.train_model(model, trainLoader, testLoader, epochs=10)
+model.save('C:/Users/kaity/Documents/GitHub/Ecotype/Models\\Balanced_melSpec_8khz_Resnet18_8khz_RTO.keras')
 #%%
 
 

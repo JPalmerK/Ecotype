@@ -12,6 +12,16 @@ import soundfile as sf
 # Create data for Birdnet
 annotations = pd.read_csv("C:/Users/kaity/Documents/PNW_ClassifierAnnotations.csv")
 
+trainLoc ="C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_train_HumpBalanced.csv"
+testLoc = "C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_test_HumpBalanced.csv"
+
+annot_train = pd.read_csv(trainLoc)
+annot_test = pd.read_csv(testLoc)
+
+annotations = pd.concat([annot_train, annot_test], axis=0)
+annotations = annotations[annotations['LowFreqHz'] < 8000]
+
+
 # Spectrogram parameters
 params = {
     'clipDur': 3,
@@ -30,22 +40,23 @@ for idx, row in annotations.iloc[0:].iterrows():
     dep = row['Dep']
     provider = row['Provider']
     utc = row['UTC']
-    speciesFolder = row['AnnoBin']
+    speciesFolder = row['Labels']
     SoundFilee = row['Soundfile']
     
     # Define the base output directory and the species-specific folder
-    base_output_dir = "C:\\TempData\\PNW_TrainingDataUnfiltered"
+    base_output_dir = "C:\\TempData\\AllData_forBirdnet\\"
     output_folder = os.path.join(base_output_dir, speciesFolder)
     
     # Create the species folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)
+    if os.path.exists(output_folder)==False:
+        os.makedirs(output_folder, exist_ok=True)
     
     # Load and process the audio segment
     file_duration = librosa.get_duration(path=file_path)
     duration = end_time - start_time
-    center_time = (start_time + end_time) / 2.0
-    new_start_time = center_time - params['clipDur'] / 2
-    new_end_time = center_time + params['clipDur'] / 2
+    center_time = start_time + (duration / 2.0)
+    new_start_time = center_time -( params['clipDur'] / 2)
+    new_end_time = center_time + (params['clipDur'] / 2)
     
     if new_end_time - new_start_time < params['clipDur']:
         pad_length = params['clipDur'] - (new_end_time - new_start_time)
@@ -55,10 +66,20 @@ for idx, row in annotations.iloc[0:].iterrows():
     new_start_time = max(0, min(new_start_time, file_duration - params['clipDur']))
     new_end_time = max(params['clipDur'], min(new_end_time, file_duration))
     
+    
+    
     audio_data, sample_rate = librosa.load(file_path, 
                                            #sr=params['outSR'], 
                                            offset=new_start_time,
-                                           duration=params['clipDur'])
+                                           duration=params['clipDur'],
+                                           mono=False)
+    # Determine the number of channels
+    num_channels = audio_data.shape[0] if audio_data.ndim > 1 else 1
+    
+    # Retain only the first channel if there are multiple
+    if num_channels > 1:
+        print(f"Audio has {num_channels} channels. Retaining only the first channel.")
+        audio_data = audio_data[0]
     
     # Define the output file path
     clipName = f"{SoundFilee}_{provider}_{dep}_{str(idx)}.wav"
@@ -67,10 +88,102 @@ for idx, row in annotations.iloc[0:].iterrows():
     # Export the audio clip
     sf.write(output_file_path, audio_data, sample_rate)
     print(f"Saved {output_file_path}")
+
+#############################################################################
+# Balanced KW not KW data
+##############################################################################
+
+# Ecotypes but create a negative class based on random selections from the 
+# MN/Vessel Noise
+    
+import pandas as pd
+import librosa
+import os
+import soundfile as sf
+# Create data for Birdnet
+
+trainLoc ="C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_train_HumpBalanced.csv"
+testLoc = "C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_test_HumpBalanced.csv"
+
+annot_train = pd.read_csv(trainLoc)
+annot_test = pd.read_csv(testLoc)
+
+annotations = pd.concat([annot_train, annot_test], axis=0)
+annotations = annotations[annotations['LowFreqHz'] < 8000]
+
+
+# Spectrogram parameters
+params = {
+    'clipDur': 3,
+    'outSR': 16000,
+    'fmin': 150
+}
+
+# Count the number of detections in each class 
+annotations.pivot_table(index = ['Labels'], aggfunc ='size')
+36743-17242-10950
+
+MnData = annotations[annotations['Labels'] == 'HW']
+# Select 8551 MN detections to add to the negative data
+new_df = MnData.sample(n=8551, random_state=1)
+
+# Iterate over each annotation
+for idx, row in new_df.iloc[0:].iterrows():
+    file_path = row['FilePath']
+    start_time = row['FileBeginSec']
+    end_time = row['FileEndSec']
+    dep = row['Dep']
+    provider = row['Provider']
+    utc = row['UTC']
+    speciesFolder = row['Labels']
+    SoundFilee = row['Soundfile']
+    
+    # Define the base output directory and the species-specific folder
+    base_output_dir = "C:\\TempData\\AllData_forBirdnet\\KWs_NegExamps\\New folder\\"
+    output_folder = os.path.join(base_output_dir, speciesFolder)
+    
+    # Create the species folder if it doesn't exist
+    if os.path.exists(output_folder)==False:
+        os.makedirs(output_folder, exist_ok=True)
+    
+    # Load and process the audio segment
+    file_duration = librosa.get_duration(path=file_path)
+    duration = end_time - start_time
+    center_time = start_time + (duration / 2.0)
+    new_start_time = center_time -( params['clipDur'] / 2)
+    new_end_time = center_time + (params['clipDur'] / 2)
+    
+    if new_end_time - new_start_time < params['clipDur']:
+        pad_length = params['clipDur'] - (new_end_time - new_start_time)
+        new_start_time = max(0, new_start_time - pad_length / 2.0)
+        new_end_time = min(file_duration, new_end_time + pad_length / 2.0)
+    
+    new_start_time = max(0, min(new_start_time, file_duration - params['clipDur']))
+    new_end_time = max(params['clipDur'], min(new_end_time, file_duration))
     
     
     
+    audio_data, sample_rate = librosa.load(file_path, 
+                                           #sr=params['outSR'], 
+                                           offset=new_start_time,
+                                           duration=params['clipDur'],
+                                           mono=False)
+    # Determine the number of channels
+    num_channels = audio_data.shape[0] if audio_data.ndim > 1 else 1
     
+    # Retain only the first channel if there are multiple
+    if num_channels > 1:
+        print(f"Audio has {num_channels} channels. Retaining only the first channel.")
+        audio_data = audio_data[0]
+    
+    # Define the output file path
+    clipName = f"{SoundFilee}_{provider}_{dep}_{str(idx)}.wav"
+    output_file_path = os.path.join(output_folder, clipName)
+    
+    # Export the audio clip
+    sf.write(output_file_path, audio_data, sample_rate)
+    print(f"Saved {output_file_path}")
+
     
     
     

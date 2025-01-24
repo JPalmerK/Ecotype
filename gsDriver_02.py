@@ -44,10 +44,6 @@ AudioParms = {
 df5_file_path_val = '/home/kpalmer/MalahatBalanced_melSpec_8khz_PCEN_300hz.h5'
 hdf5_file_path_traintest = '/home/kpalmer/Balanced_melSpec_8khz_SNR_PCEN_300Hz.h5'
 
-# hdf5_file_path_traintest = '/home/kpalmer/Balanced_melSpec_8khz_SNR_PCEN_test.h5'
-# hdf5_file_path_val = '/home/kpalmer/MalahatBalanced_melSpec_8khz_PCEN_test.h5'
-
-
 
 # Create the batch loader instances
 trainLoader = Eco.BatchLoader2(hdf5_file_path_traintest, 

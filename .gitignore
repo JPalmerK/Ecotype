@@ -7,3 +7,5 @@ blarg2
 *.keras
 *.pyc
 *.csv
+R Code/.Rhistory
+*.log

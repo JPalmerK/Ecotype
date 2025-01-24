@@ -30,71 +30,46 @@ import os
 
 # np.random.seed(seed=2)
 
-# # New more balanced train/test dataset so load that then create the HDF5 database
-# # annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTrain2_Edrive.csv")
-# # annot_val = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/EcotypeTest2_Edrive.csv")
-
-# # New more balanced train/test dataset so load that then create the HDF5 database
-# annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/RTO_train.csv")
-# annot_test = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/RTO_test.csv")
-# annot_val = pd.read_csv('C:/Users/kaity/Documents/GitHub/Ecotype/RTO_malahat.csv')
+# New more balanced train/test dataset so load that then create the HDF5 database
+annot_train = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_train_HumpBalanced.csv")
+annot_test = pd.read_csv("C:/Users/kaity/Documents/GitHub/Ecotype/Experiments\\HumpbackBalanced\\Data\\RTO_train_HumpBalanced.csv")
 
 
-# AllAnno = pd.concat([annot_train, annot_test], axis=0)
-# AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
 
-# # Shuffle the DataFrame rows for debugging
-# AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
+AllAnno = pd.concat([annot_train, annot_test], axis=0)
+AllAnno = AllAnno[AllAnno['LowFreqHz'] < 8000]
 
-
-# # Function to create and save a spectrogram plot
-# def makePlot(spectrogram, save_path):
-#     if isinstance(spectrogram, np.ndarray):
-#         spectrogram = spectrogram.astype(np.float32)
-#     else:
-#         raise TypeError("Spectrogram should be a NumPy array.")
-#     plt.figure(figsize=(10, 4))  # Adjust the figure size as needed
-#     plt.imshow(np.array(spectrogram), 
-#                 aspect='auto', 
-#                 origin='lower', 
-#                 cmap='viridis')  # Adjust parameters as needed
-#     plt.colorbar(label='Intensity')
-#     plt.xlabel('Time')
-#     plt.ylabel('Frequency Bin')
-#     plt.title('Spectrogram')
-#     plt.tight_layout()
-#     plt.savefig(save_path, format='png')  # Save the figure
-#     plt.close()  # Close the plot to free up memory
+# Shuffle the DataFrame rows for debugging
+AllAnno = AllAnno.sample(frac=1, random_state=42).reset_index(drop=True)
 
 
     
-# #%% Test the parameters by making example spectrograms
+#%% Test the parameters by making example spectrograms
+
+# Set up audio parameters
+AudioParms = {
+            'clipDur': 3,
+            'outSR': 8000,
+            'nfft': 512,
+            'hop_length':256,
+            'spec_type': 'mel',  
+            'spec_power':2,
+            'rowNorm': False,
+            'colNorm': False,
+            'rmDCoffset': False,
+            'inSR': None, 
+            'PCEN': True,
+            'fmin': 0}
 
 
-# # Set up audio parameters
-# AudioParms = {
-#             'clipDur': 3,
-#             'outSR': 8000,
-#             'nfft': 512,
-#             'hop_length':256,
-#             'spec_type': 'mel',  
-#             'spec_power':2,
-#             'rowNorm': False,
-#             'colNorm': False,
-#             'rmDCoffset': False,
-#             'inSR': None, 
-#             'PCEN': True,
-#             'fmin': 0}
 
 
+#%% Make the HDF5 files for training testing and evaluation
 
 
-# #%% Make the HDF5 files for training testing and evaluation
-
-
-# h5_fileTrainTest = 'C:/Users/kaity/Documents/GitHub/Ecotype/HDF5 Files\\Balanced_melSpec_8khz_PCEN_RTW.h5'
-# Eco.create_hdf5_dataset(annotations=AllAnno, hdf5_filename= h5_fileTrainTest_hop25, 
-#                         parms=AudioParms)
+h5_fileTrainTest = 'C:/Users/kaity/Documents/GitHub/Ecotype/Experiments/HumpbackBalanced\\Data\\MnBalanced_8khz_PCEN_RTW.h5'
+Eco.create_hdf5_dataset(annotations=AllAnno, hdf5_filename= h5_fileTrainTest, 
+                        parms=AudioParms)
 
 
 # # Create the database for the the validation data
