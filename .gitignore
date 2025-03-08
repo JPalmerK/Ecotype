@@ -10,3 +10,16 @@ blarg2
 R Code/.Rhistory
 *.log
 *.txt
+.RData
+*.tsv
+.Rhistory
+Book1.xlsx
+*.tflite
+*.pb
+*.index
+*.joblib
+*.json
+*.npz
+*.pkl
+*.data-00000-of-00001
+*.tmp
