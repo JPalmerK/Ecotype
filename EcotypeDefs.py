@@ -22,10 +22,11 @@ from keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Add, Activ
 from keras.models import load_model
 import keras
 from keras import Model
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import scipy.signal
 #import gcsfs
 from tensorflow.keras.callbacks import TensorBoard
+#import seaborn as sns
 
 
 def create_spectrogram(audio, return_snr=False,**kwargs):
@@ -61,18 +62,20 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         'rowNorm': False,        # normalize the spectrogram rows
         'colNorm': False,        # normalize the spectrogram columns
         'rmDCoffset': True,     # remove DC offset by subtracting mean
+        'NormalizeAudio':True,
         'inSR': None,            # original sample rate of the audio file
         'spec_power':2,
         'returnDB':True,         # return spectrogram in linear or convert to db 
         'PCEN':False,             # Per channel energy normalization
-        'PCEN_power':31,
-        'time_constant':.8,
+        'PCEN_power':0.5,
+        'time_constant':0.4,
         'eps':1e-6,
-        'gain':0.08,
-        'power':.25,
-        'bias':10,
+        'gain':0.9,
+        'power':0.5,
+        'bias':2,
         'fmin':0,
         'fmax':16000,
+        'NormalizeAudio': False, # normalized the audio to 0 to 1
         'Scale Spectrogram': False, # scale the spectrogram between 0 and 1
         'AnnotationTrain': 'bla',
         'AnnotationsTest': 'bla',
@@ -95,6 +98,11 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
     # Remove DC offset
     if params['rmDCoffset']:
         audio = audio - np.mean(audio)
+        
+        
+    # Remove DC offset- must scale audio to 0-1 for PECN
+    if params['NormalizeAudio']:
+        audio = (audio - np.min(audio)) / (np.max(audio) - np.min(audio))  
     
     # Compute spectrogram
     if params['spec_type'] == 'normal':
@@ -133,6 +141,7 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         
         # PCEN
         if params['PCEN']==True:
+            
             spectrogram =librosa.pcen( 
                 S = melspec * (2 ** params['PCEN_power']),
                 time_constant=params['time_constant'],
@@ -164,14 +173,11 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
         raise ValueError("Invalid spectrogram type. Supported types are 'normal' and 'mel'.")
     
 
-    # # Trim frequencies if min_freq is specified
-    # if params['min_freq'] is not None:
-    #     mel_frequencies = librosa.core.mel_frequencies(n_mels=spectrogram.shape[0] + 2)
-    #     min_idx = np.argmax(mel_frequencies >= params['min_freq'])
-    #     spectrogram = spectrogram[min_idx:, :]
         
     if params['Scale Spectrogram'] == True:
         spectrogram = (spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram) + 1e-8)
+        #plt.imshow(np.flipud(spectrogram))
+        spectrogram =  np.float32(spectrogram)
         
     # Calculate SNR if requested
     if return_snr:
@@ -182,10 +188,6 @@ def create_spectrogram(audio, return_snr=False,**kwargs):
     
     
     return spectrogram
-
-
-
-
 
 # Redefine to independnetly create the audio representations
 def load_and_process_audio_segment(file_path, start_time, end_time,
@@ -242,7 +244,8 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
     new_end_time = max(params['clipDur'], min(new_end_time, file_duration))
     
     # Load audio segment and downsample to the defined sampling rate
-    audio_data, sample_rate = librosa.load(file_path, sr=params['outSR'], 
+    audio_data, sample_rate = librosa.load(file_path, 
+                                           sr=params['outSR'], 
                                            offset=new_start_time,
                                            duration=params['clipDur'],
                                            mono=False)
@@ -262,9 +265,6 @@ def load_and_process_audio_segment(file_path, start_time, end_time,
         return spec, snr
     else:
         return spec
-
-
-
 
 # Load and process audio segments, and save spectrograms and labels to HDF5 file
 def create_hdf5_dataset(annotations, hdf5_filename, parms):
@@ -309,7 +309,8 @@ def create_hdf5_dataset(annotations, hdf5_filename, parms):
 
             # Load and process audio segment
             spec, SNR = load_and_process_audio_segment(file_path, start_time, 
-                                                       end_time, return_snr=True, **parms)
+                                                       end_time, 
+                                                       return_snr=True, **parms)
 
             # Determine which group to store in (train or test)
             dataset = train_group if traintest == 'Train' else test_group
@@ -448,9 +449,6 @@ def create_hdf5_dataset_parallel2(annotations, hdf5_filename, parms, batch_size=
     print("HDF5 dataset creation completed.")
 
 
-
-#####################################
-
 def create_clip_folder(annotations, fileOutLoc, parms):
     """
     Create folders wtih clips of each label
@@ -530,9 +528,6 @@ def create_hdf5_dataset_parallel(annotations, hdf5_filename, num_threads=4):
 
                 print(ii, ' of ', len(annotations))
 
-
-
-import math
     
 class BatchLoader2(keras.utils.Sequence):
     def __init__(self, hdf5_file, batch_size=250, trainTest='train',
@@ -548,7 +543,6 @@ class BatchLoader2(keras.utils.Sequence):
         self.num_samples = len(self.data_keys)
         self.indexes = np.arange(self.num_samples)
         
-       
         # Get th spectrogram size, assume something in Train
         self.train_group = self.hf[trainTest]
         self.first_key = list(self.train_group.keys())[0]
@@ -559,21 +553,6 @@ class BatchLoader2(keras.utils.Sequence):
         self.minFreq = minFreq
         self.minIdx = 0
         
-        # # This really shouldn't be used anymore because the data representaion
-        # # has the meta and as of now, if the frequencies are restricted there is
-        # # no place to store that info.
-        # #This is for trimming the frequency range
-        # if math.isfinite(self.minFreq):
-        #      mel_frequencies = librosa.core.mel_frequencies(n_mels= self.specSize[0]+2)
-
-        #      # Find the index corresponding to 500 Hz in mel_frequencies
-        #      self.minIdx = np.argmax(mel_frequencies >= self.minFreq)
-            
-        #     # # # also update the spectrogram size
-        #      self.data= self.data[self.minIdx:,:]
-        #      self.specSize = self.data.shape
-     
-        
         if self.shuffle:
             np.random.shuffle(self.indexes)
         
@@ -581,8 +560,8 @@ class BatchLoader2(keras.utils.Sequence):
         return int(np.ceil(self.num_samples / self.batch_size))
     
     def __getitem__(self, index):
-        start_index = index * self.batch_size
-        end_index = min((index + 1) * self.batch_size, self.num_samples)
+        start_index = (index-1) * self.batch_size
+        end_index = min((index ) * self.batch_size, self.num_samples)-1
         
         batch_data = []
         batch_labels = []
@@ -598,6 +577,8 @@ class BatchLoader2(keras.utils.Sequence):
             return batch_data, batch_labels
         else:
             return np.array(batch_data), keras.utils.to_categorical(np.array(batch_labels),  num_classes=self.n_classes)
+
+    
     def __shuffle__(self):
         np.random.shuffle(self.indexes)
         print('shuffled!')
@@ -608,33 +589,10 @@ class BatchLoader2(keras.utils.Sequence):
             np.random.shuffle(self.indexes)
             print('Epoc end all shuffled!')
 
+import numpy as np
+import keras
+import random
 
-
-
-def train_model(model, train_generator, val_generator, epochs, 
-                tensorBoard=False):
-    # Define early stopping callback
-    early_stopping = EarlyStopping(monitor='val_loss',
-                                   patience=3, 
-                                   restore_best_weights=True)
-    
-    if tensorBoard:
-
-        # Define the TensorBoard callback
-        tensorboard_callback = TensorBoard(log_dir='./logs', histogram_freq=1)
-        
-
-        # Train the model with early stopping
-        model.fit(x=train_generator,  # Here, `train_generator` should be a generator object
-                  epochs=epochs,
-                  validation_data=val_generator,
-                  callbacks=[early_stopping, tensorboard_callback])
-    else:
-        # Train the model with early stopping
-        model.fit(x=train_generator,  # Here, `train_generator` should be a generator object
-                  epochs=epochs,
-                  validation_data=val_generator,
-                  callbacks=[early_stopping])
 
 
 def train_model_history(model, train_generator, val_generator, epochs, tensorBoard=False):
@@ -661,8 +619,10 @@ def train_model_history(model, train_generator, val_generator, epochs, tensorBoa
     '''
     # Define early stopping callback
     early_stopping = EarlyStopping(monitor='val_loss',
-                                   patience=3, 
+                                   patience=5, 
                                    restore_best_weights=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2,
+                              patience=5, min_lr=0.001)
     
     if tensorBoard:
         # Define the TensorBoard callback
@@ -678,11 +638,180 @@ def train_model_history(model, train_generator, val_generator, epochs, tensorBoa
         history = model.fit(x=train_generator,
                             epochs=epochs,
                             validation_data=val_generator,
-                            callbacks=[early_stopping])
+                            callbacks=[early_stopping, ReduceLROnPlateau])
 
     return history    
 
 
+class BatchLoader_hardNegs(keras.utils.Sequence):
+    def __init__(self, hdf5_file, batch_size=250, trainTest='train',
+                 shuffle=True, n_classes=7, return_data_labels=False,
+                 minFreq=None):
+        self.hf = h5py.File(hdf5_file, 'r')
+        self.batch_size = batch_size
+        self.trainTest = trainTest
+        self.shuffle = shuffle
+        self.n_classes = n_classes
+        self.return_data_labels = return_data_labels
+
+        # Store references to both train and test groups
+        self.train_group = self.hf['train']
+        self.test_group = self.hf['test']
+
+        # Initialize data keys and their source group (train or test)
+        self.data_keys = list(self.hf[trainTest].keys())
+        self.key_source = {key: trainTest for key in self.data_keys}  # Track which group a key belongs to
+        self.num_samples = len(self.data_keys)
+        self.indexes = np.arange(self.num_samples)
+
+        # Get spectrogram size from the first sample
+        self.first_key = self.data_keys[0]
+        self.specSize = self.hf[trainTest][self.first_key]['spectrogram'].shape
+
+        # Frequency settings
+        self.minFreq = minFreq
+        self.minIdx = 0
+
+        if self.shuffle:
+            np.random.shuffle(self.indexes)
+
+    def __len__(self):
+        return int(np.ceil(self.num_samples / self.batch_size))
+
+    def __getitem__(self, index):
+        start_index = index * self.batch_size
+        end_index = min((index + 1) * self.batch_size, self.num_samples)
+
+        batch_data = []
+        batch_labels = []
+
+        for i in range(start_index, end_index):
+            key = self.data_keys[self.indexes[i]]
+            source_group = self.key_source[key]  # Determine whether it came from train or test
+
+            spec = self.hf[source_group][key]['spectrogram'][self.minIdx:, :]
+            label = self.hf[source_group][key]['label'][()]
+            batch_data.append(spec)
+            batch_labels.append(label)
+
+        if self.return_data_labels:
+            return batch_data, batch_labels
+        else:
+            return np.array(batch_data), keras.utils.to_categorical(np.array(batch_labels), num_classes=self.n_classes)
+
+    def add_hard_negatives(self, hard_negatives):
+        """Move hard negatives from test to train and update indices."""
+        new_keys = [key for key in hard_negatives if key in self.test_group]  # Ensure they exist in test
+
+        if not new_keys:
+            print("Warning: No valid hard negatives found in test.")
+            return
+
+        # Add new keys and update their source to 'test'
+        for key in new_keys:
+            self.key_source[key] = 'test'  # Even if they're now in training, they originated from test
+
+        self.data_keys = list(np.unique(self.data_keys + new_keys))  # Merge and remove duplicates
+        self.num_samples = len(self.data_keys)
+        self.indexes = np.arange(self.num_samples)  # Update indexes
+
+        self.__shuffle__()
+        print(f"Training set now has {self.num_samples} samples (including hard negatives).")
+
+    def __shuffle__(self):
+        np.random.shuffle(self.indexes)
+        print('Shuffled!')
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.indexes)
+            print('Epoch end: all shuffled!')
+
+
+def train_model_history_hardNeg(model, train_generator,
+                                val_generator, 
+                                epochs, tensorBoard=False):
+    '''
+    Train model function with hard negative mining.
+    
+    Parameters
+    ----------
+    model : keras model
+        trained Keras model.
+    train_generator : 
+        train batch generator created with BatchLoader2 .
+    val_generator : 
+        validation batch generator created with BatchLoader2 .
+    epochs : int
+        Number of epochs to run.
+    tensorBoard : bool, optional
+        Whether to run tensorboard.
+
+    Returns
+    -------
+    history, history_hard
+    '''
+    # Define early stopping callback
+    early_stopping = EarlyStopping(monitor='val_loss', patience=3,
+                                   restore_best_weights=True)
+    reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=0.0001)
+    callbacks = [early_stopping, reduce_lr]
+
+    # Train model initially
+    print("Starting initial training...")
+    history = model.fit(x=train_generator, epochs=epochs,
+                        validation_data=val_generator,
+                        callbacks=callbacks)  
+
+    # Identify hard negatives
+    print("Identifying hard negatives...")
+    hard_negatives = identify_hard_negatives(model, val_generator)
+    train_generator.add_hard_negatives(hard_negatives)  # Add them to training
+    
+    # Define a new early stopping for hard negatives training
+    early_stopping_hard = EarlyStopping(monitor='val_loss', patience=3,
+                                        restore_best_weights=True)
+    callbacks_hard = [early_stopping_hard, reduce_lr]
+    
+    # Retrain model with hard negatives
+    print("Retraining with hard negatives...")
+    history_hard = model.fit(x=train_generator, epochs=int(epochs // 2), 
+                             validation_data=val_generator, 
+                             callbacks=callbacks_hard)
+
+
+    return history, history_hard
+
+def identify_hard_negatives(model, data_generator):
+    '''
+    Identify hard negatives by running inference and checking misclassifications.
+    
+    Parameters
+    ----------
+    model : keras model
+        Trained model.
+    data_generator : keras.utils.Sequence
+        Validation generator.
+    
+    Returns
+    -------
+    hard_negatives : list
+        List of misclassified sample keys.
+    '''
+    hard_negatives = []
+
+    for i in range(len(data_generator)):
+        batch_data, batch_labels = data_generator[i]
+        predictions = model.predict(batch_data)
+
+        for j, (pred, true_label) in enumerate(zip(predictions, batch_labels)):
+            if np.argmax(pred) != np.argmax(true_label):  # Misclassification
+                sample_key = data_generator.data_keys[i * data_generator.batch_size + j]
+                if sample_key not in hard_negatives:  # Avoid duplicates
+                    hard_negatives.append(sample_key)
+
+    print(f"Found {len(hard_negatives)} hard negatives.")
+    return hard_negatives
 
 def plot_training_curves(history):
     '''
@@ -729,8 +858,6 @@ def plot_training_curves(history):
     
     plt.tight_layout()
     plt.show()
-
-
     
 
 def check_spectrogram_dimensions(hdf5_file):
@@ -745,11 +872,13 @@ def check_spectrogram_dimensions(hdf5_file):
     return spectrogram_shapes
 
 ###########################################################################
-# Work someting up more like resnet.
+# Different Models
 #########################################################################
 
 from keras.applications.resnet50 import ResNet50
 from keras.layers import GlobalAveragePooling2D
+from tensorflow import keras
+from tensorflow.keras import layers
 
 def create_resnet50(input_shape, num_classes):
     # Use a custom input tensor
@@ -788,8 +917,6 @@ def create_resnet101(input_shape, num_classes):
     model = Model(inputs=base_model.input, outputs=output)
     model.summary()
     return model
-
-
 
 def create_model_with_resnet(input_shape, num_classes, actName = 'relu'):
     input_layer = Input(shape=input_shape)
@@ -832,7 +959,6 @@ def create_wider_model(input_shape, num_classes, actName='relu'):
     model = Model(inputs=input_layer, outputs=output_layer)
     return model
 
-
 def identity_block(input_tensor, filters):
     x = Conv2D(filters, kernel_size=(3, 3), activation='relu', padding='same')(input_tensor)
     #x = BatchNormalization()(x)
@@ -840,7 +966,6 @@ def identity_block(input_tensor, filters):
     x = Add()([x, input_tensor])  # Add the input tensor to the output of the second convolution
     x = Activation('relu')(x)
     return x
-
 
 def create_wider_model2(input_shape, num_classes, actName='relu'):
     input_layer = Input(shape=input_shape)
@@ -885,6 +1010,37 @@ def identity_block2(input_tensor, filters):
     
     return x
 
+# Enable mixed precision for speedup on supported hardware
+
+def create_birdnet_like_model(input_shape=(128, 883, 1), num_classes=2):
+    inputs = keras.Input(shape=input_shape)
+    
+    # Initial Conv Layer
+    x = layers.Conv2D(32, (3, 3), strides=1, padding="same", activation="relu")(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Depthwise Separable Convolutions (efficient feature extraction)
+    for filters in [64, 128, 256]:
+        x = layers.SeparableConv2D(filters, (3, 3), activation="relu", padding="same")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Bottleneck Conv Layer
+    x = layers.Conv2D(512, (3, 3), activation="relu", padding="same")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.GlobalAveragePooling2D()(x)
+    
+    # Fully Connected Layer
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+    
+    # Output Layer
+    outputs = layers.Dense(num_classes, activation="softmax", dtype="float32")(x)  # Ensure float32 output
+    
+    model = keras.Model(inputs, outputs, name="BirdNET_Like_Model")
+    return model
 
 # Compile model
 def compile_model(model, loss_val = 'categorical_crossentropy'):
@@ -892,6 +1048,88 @@ def compile_model(model, loss_val = 'categorical_crossentropy'):
                   optimizer='adam', 
                   metrics=['accuracy'])
     return model
+
+
+import tensorflow as tf
+from tensorflow.keras import models, regularizers
+
+def residual_block(x, filters):
+    """ Residual block: Conv + BN + ReLU + Conv + BN + Add """
+    shortcut = x  # Identity mapping
+    x = layers.Conv2D(filters, (3, 3), padding="same", activation=None, kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.Conv2D(filters, (3, 3), padding="same", activation=None, kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Add()([x, shortcut])  # Residual connection
+    x = layers.ReLU()(x)
+    return x
+
+def downsampling_block(x, filters):
+    """ Downsampling block: Conv (stride=2) + BN + ReLU """
+    x = layers.Conv2D(filters, (3, 3), strides=2, padding="same", activation=None, kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    return x
+
+def create_birdnet(input_shape=(64, 384, 1), num_classes=987):
+    inputs = layers.Input(shape=input_shape)
+
+    # Preprocessing Conv Block
+    x = layers.Conv2D(32, (5, 5), padding="same", activation="relu", kernel_regularizer=regularizers.l2(0.001))(inputs)
+    x = layers.BatchNormalization()(x)
+
+    # ResStack 1
+    x = downsampling_block(x, 64)   # (64, 32, 96)
+    x = residual_block(x, 64)
+    x = residual_block(x, 64)
+
+    # ResStack 2
+    x = downsampling_block(x, 128)  # (128, 16, 48)
+    x = residual_block(x, 128)
+    x = residual_block(x, 128)
+
+    # ResStack 3
+    x = downsampling_block(x, 256)  # (256, 8, 24)
+    x = residual_block(x, 256)
+    x = residual_block(x, 256)
+
+    # ResStack 4
+    x = downsampling_block(x, 512)  # (512, 4, 12)
+    x = residual_block(x, 512)
+    x = residual_block(x, 512)
+
+    # Classification Head
+    x = layers.Conv2D(512, (4, 10), padding="same", activation="relu", kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+
+    x = layers.Conv2D(1024, (1, 1), padding="same", activation="relu", kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+
+    x = layers.Conv2D(num_classes, (1, 1), padding="same", activation=None, kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+
+    # Global Log-Mel Energy Pooling
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Output Layer with Sigmoid Activation
+    outputs = layers.Dense(num_classes, activation="sigmoid")(x)  
+
+    model = models.Model(inputs, outputs, name="BirdNET")
+    return model
+
+# Compile model
+def compile_model(model):
+    model.compile(
+        loss='binary_crossentropy',  # Multi-label classification
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),  
+        metrics=['accuracy']
+    )
+    return model
+
 
 
 #############################################################################
@@ -933,9 +1171,6 @@ def ResNet1_testing(input_shape, num_classes):
 
 
     return model
-
-
-
 
 
 def ResNet18(input_shape, num_classes):
@@ -1001,8 +1236,6 @@ def ResNet18(input_shape, num_classes):
 
 
     return model
-
-
 
 def ResNet18_batchNorm(input_shape, num_classes):
     input_layer = Input(shape=input_shape)
@@ -1124,13 +1357,13 @@ def saveModelData(model,modelName, savePath, metadata):
 # Model Evaluation Class
 #########################################################################
 
-#import seaborn as sns
+import seaborn as sns
 from sklearn.metrics import confusion_matrix, accuracy_score
 
 # So this is well and good but I'd like to create be able to look at the timestamps
 # from the predictions so we can do something lie softmax
 
-def plot_training_curves(history):
+def plot_training_curves(history, titleStr = ' blart'):
     """
     Plots training and validation accuracy/loss curves.
 
@@ -1150,7 +1383,7 @@ def plot_training_curves(history):
     plt.subplot(1, 2, 1)
     plt.plot(epochs, acc, label='Training Accuracy', marker='o')
     plt.plot(epochs, val_acc, label='Validation Accuracy', marker='o')
-    plt.title('Training and Validation Accuracy')
+    plt.title('Training and Validation Accuracy'+ titleStr)
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
@@ -1159,7 +1392,7 @@ def plot_training_curves(history):
     plt.subplot(1, 2, 2)
     plt.plot(epochs, loss, label='Training Loss', marker='o')
     plt.plot(epochs, val_loss, label='Validation Loss', marker='o')
-    plt.title('Training and Validation Loss')
+    plt.title('Training and Validation Loss'+titleStr)
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
@@ -1167,6 +1400,17 @@ def plot_training_curves(history):
     plt.tight_layout()
     plt.show()
 
+
+
+
+
+
+#########################################################################
+#Pipeline for producing streaming detections- Does not work on GS cloud so comment
+##########################################################################
+
+
+import soundfile as sf
 
 from sklearn.metrics import precision_recall_curve, average_precision_score
 
@@ -1235,7 +1479,8 @@ class ModelEvaluator:
         # Normalize confusion matrix by rows
         conf_matrix_percent = conf_matrix_raw.astype(np.float64)
         row_sums = conf_matrix_raw.sum(axis=1, keepdims=True)
-        conf_matrix_percent = np.divide(conf_matrix_percent, row_sums, where=row_sums != 0) * 100
+        conf_matrix_percent = np.round(np.divide(conf_matrix_percent, row_sums, 
+                                        where=row_sums != 0) * 100,2)
 
         # Map numeric labels to human-readable labels
         unique_labels = sorted(set(self.y_true_accum) | set(self.y_pred_accum))
@@ -1335,23 +1580,261 @@ class ModelEvaluator:
     
         return precision_recall_data
 
+    
+import tensorflow.lite as tflite
+import scipy.special
 
 
+import os
+import numpy as np
+import pandas as pd
+import librosa
+import scipy.special
+from tensorflow import lite as tflite  # Using TensorFlow's built-in lite interpreter
+
+import os
+import numpy as np
+import pandas as pd
+import librosa
+import scipy.special
+from tensorflow import lite as tflite  # Using TensorFlow's built-in lite interpreter
+
+class BirdNetPredictor:
+    def __init__(self, model_path, label_path, audio_folder, 
+                 sample_rate=48000, audio_duration=3.0, confidence_thresh=0.5):
+        """
+        Processor class for running TFLite (e.g. BirdNET) models on audio files
+        in a folder.
+        
+        Parameters:
+            model_path (str): Path to the TensorFlow Lite model.
+            label_path (str): Path to the label file (text file with one label per line).
+            audio_folder (str): Path to the folder containing audio files.
+            sample_rate (int): Sample rate for the model (default 48000).
+            audio_duration (float): Duration in seconds of audio to classify (default 3.0).
+            confidence_thresh (float): Confidence threshold for filtering predictions.
+        """
+        self.model_path = model_path
+        self.label_path = label_path
+        self.audio_folder = audio_folder
+        self.sample_rate = sample_rate
+        self.audio_duration = audio_duration
+        self.confidence_thresh = confidence_thresh
+        
+        # Load model and labels using TensorFlow Lite interpreter
+        self.interpreter = tflite.Interpreter(model_path=model_path)
+        self.interpreter.allocate_tensors()
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+        
+        # Extract expected duration from model input shape
+        input_shape = self.input_details[0]['shape']
+        self.audio_duration = input_shape[1] / self.sample_rate
+        print(f"Model expects {self.audio_duration} seconds of audio at {self.sample_rate} Hz")
+        
+        # Load labels
+        self.labels = self.load_labels(label_path)
+    
+    def load_labels(self, label_path):
+        """Load class labels from a text file (one label per line)."""
+        with open(label_path, "r") as f:
+            return [line.strip() for line in f.readlines()]
+    
+    def preprocess_audio(self, audio, sr, target_sr=48000, duration=3.0):
+        """Resample, trim/pad, and format audio to match model input."""
+        if sr != target_sr:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+        
+        # Calculate required number of samples for the given duration
+        required_length = int(target_sr * duration)
+    
+        # Zero padding if the segment is shorter than required, else trim
+        if len(audio) < required_length:
+            padding = required_length - len(audio)
+            audio = np.pad(audio, (0, padding), mode='constant', constant_values=0)
+        else:
+            audio = audio[:required_length]
+        
+        return np.expand_dims(audio.astype(np.float32), axis=0)
+    
+    def predict_segment(self, audio_segment):
+        """Run inference on a single preprocessed audio segment."""
+        self.interpreter.set_tensor(self.input_details[0]['index'], audio_segment)
+        self.interpreter.invoke()
+        predictions = self.interpreter.get_tensor(self.output_details[0]['index'])[0]
+        return predictions
+    
+    def predict_long_audio(self, audio_path, return_raw_scores=False):
+        """ 
+        Split a long audio file into fixed-length chunks and classify each segment.
+        
+        Parameters:
+            audio_path (str): Path to the audio file.
+            return_raw_scores (bool): If True, return a tuple containing the DataFrame
+                with raw logits and confidence scores for all classes (one row per segment)
+                along with the final predictions.
+        
+        Returns:
+            - If return_raw_scores is False:
+                 A DataFrame with predictions above the confidence threshold.
+            - If return_raw_scores is True:
+                 A tuple (results_df, raw_scores_df) where:
+                     - results_df: DataFrame with predictions above the threshold.
+                     - raw_scores_df: DataFrame with all raw scores for all classes, one row per segment.
+        """
+        y, sr = librosa.load(audio_path, sr=None)  # Load with native sample rate
+        segment_length = int(sr * self.audio_duration)  # Samples per segment
+        num_segments = int(np.ceil(len(y) / segment_length))
+    
+        results = []
+        raw_scores = []
+    
+        for i in range(num_segments):
+            start_sample = i * segment_length
+            end_sample = min((i + 1) * segment_length, len(y))
+            segment = y[start_sample:end_sample]
+    
+            # Preprocess segment
+            processed_segment = self.preprocess_audio(segment, sr=sr, 
+                                                      target_sr=self.sample_rate,
+                                                      duration=self.audio_duration)
+    
+            # Predict (logit output)
+            predictions = self.predict_segment(processed_segment)
+    
+            # Convert logits to confidence scores using sigmoid
+            confidence_scores = scipy.special.expit(predictions)
+    
+            # Build filtered results: one row per class above threshold for this segment
+            for class_idx, (logit, confidence) in enumerate(zip(predictions, confidence_scores)):
+                label = self.labels[class_idx] if class_idx < len(self.labels) else f"Unknown Class {class_idx}"
+                if confidence >= self.confidence_thresh:
+                    results.append({
+                        "Begin Time (S)": round(start_sample / sr, 2),
+                        "End Time (S)": round(end_sample / sr, 2),
+                        "Class": label,
+                        "Common name": label,  # Replace with common name if needed
+                        "Score": round(confidence, 4),
+                        "File": os.path.basename(audio_path),
+                        "FilePath": audio_path
+                    })
+    
+            # Build raw scores row: one row per segment with a column for each class
+            raw_scores_row = {
+                "Begin Time (S)": round(start_sample / sr, 2),
+                "End Time (S)": round(end_sample / sr, 2),
+                "File": os.path.basename(audio_path),
+                "FilePath": audio_path
+            }
+            for class_idx, (logit, confidence) in enumerate(zip(predictions, confidence_scores)):
+                label = self.labels[class_idx] if class_idx < len(self.labels) else f"Unknown Class {class_idx}"
+                raw_scores_row[label] = round(confidence, 4)
+            raw_scores.append(raw_scores_row)
+    
+            print(f"Segment {i + 1}: Processed {len(self.labels)} classes")
+    
+        results_df = pd.DataFrame(results)
+        raw_scores_df = pd.DataFrame(raw_scores)
+    
+        if return_raw_scores:
+            return results_df, raw_scores_df
+        else:
+            return results_df
+    
+    def batch_process_audio_folder(self, output_csv="predictions.csv", return_raw_scores=False):
+        """
+        Recursively process all audio files in a folder and save results to CSV.
+        
+        Parameters:
+            output_csv (str): Path to save the results CSV.
+            return_raw_scores (bool): If True, also process and return raw score DataFrames.
+        
+        Returns:
+            - If return_raw_scores is False:
+                 A concatenated DataFrame of predictions above the threshold.
+            - If return_raw_scores is True:
+                 A tuple (final_df, raw_scores_df) where:
+                     - final_df: Concatenated DataFrame of predictions above the threshold.
+                     - raw_scores_df: Concatenated DataFrame of all raw scores for all classes.
+        """
+        all_results = []
+        all_raw_scores = []  # Store raw scores separately
+    
+        for root, _, files in os.walk(self.audio_folder):
+            for filename in files:
+                if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg')):
+                    audio_path = os.path.join(root, filename)
+                    print(f"Processing {audio_path}...")
+    
+                    if return_raw_scores:
+                        results_df, raw_scores_df = self.predict_long_audio(audio_path, return_raw_scores=True)
+                        all_results.append(results_df)
+                        all_raw_scores.append(raw_scores_df)
+                    else:
+                        results_df = self.predict_long_audio(audio_path, return_raw_scores=False)
+                        all_results.append(results_df)
+    
+        final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+        final_df.to_csv(output_csv, index=False)
+        print(f"Batch processing complete! Results saved to {output_csv}")
+    
+        if return_raw_scores and all_raw_scores:
+            raw_scores_df = pd.concat(all_raw_scores, ignore_index=True)
+            return final_df, raw_scores_df
+        else:
+            return final_df
+    
+    def export_to_raven(self, df, raven_file="raven_output.txt"):
+        """Export prediction results to a Raven selection table format."""
+        df['Selection'] = range(1, df.shape[0] + 1)
+        df['Channel'] = 1
+        df['View'] = 'Spectrogram 1'
+    
+        with open(raven_file, 'w') as f:
+            # Write header
+            f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tCommon name\tScore\n")
+            for _, row in df.iterrows():
+                line = f"{row['Selection']}\t{row['View']}\t{row['Channel']}\t{row['Begin Time (S)']}\t{row['End Time (S)']}\t{row['Common name']}\t{row['Score']}\n"
+                f.write(line)
+    
+        print(f"Raven selection table exported to {raven_file}")
 
 
-#########################################################################
-#Pipeline for producing streaming detections- Does not work on GS cloud so comment
-##########################################################################
-
-
-import soundfile as sf
-
-# class AudioProcessor4:
+# class AudioProcessor5:    
 #     def __init__(self, folder_path=None, segment_duration=2.0, overlap=1.0, 
 #                   params=None, model=None, detection_thresholds=None,
 #                   selection_table_name="detections.txt", class_names=None,
-#                   table_type="selection"):
-#         print('This version is depreciated because it is too damn slow. Use Audiopressor instead')
+#                   table_type="selection",outputAllScores = False,
+#                   retain_detections = True):
+#         """
+
+#         Parameters
+#         ----------
+#         folder_path : TYPE, optional
+#             DESCRIPTION. The default is None.
+#         segment_duration : TYPE, optional
+#             DESCRIPTION. The default is 2.0.
+#         overlap : Float, optional
+#             DESCRIPTION. Seconds of overlap in the audio advancement.
+#             The default is 1.0.
+#         params : TYPE, optional
+#             DESCRIPTION. The default is None.
+#         model : TYPE, optional
+#             DESCRIPTION. The default is None.
+#         detection_thresholds : TYPE, optional
+#             DESCRIPTION. The default is None.
+#         selection_table_name : TYPE, optional
+#             DESCRIPTION. The default is "detections.txt".
+#         class_names : TYPE, optional
+#             DESCRIPTION. The default is None.
+#         table_type : TYPE, optional
+#             DESCRIPTION. The default is "selection".
+
+#         Returns
+#         -------
+#         None.
+
+#         """
 #         self.folder_path = folder_path
 #         self.audio_files = self.find_audio_files(folder_path) if folder_path else []
 #         self.segment_duration = segment_duration
@@ -1369,7 +1852,6 @@ import soundfile as sf
 #         }
 #         self.model = model
 #         self.model_input_shape = model.input_shape[1:] if model else None
-        
 #         self.detection_thresholds = detection_thresholds if detection_thresholds else {
 #             class_id: 0.5 for class_id in range(7)
 #         }
@@ -1386,7 +1868,11 @@ import soundfile as sf
 #         self.table_type = table_type
 #         self.init_selection_table()
 #         self.detection_counter = 0
-        
+#         self._spec_buffer = None  # Buffer for spectrogram optimization
+#         self.DataSR = 96000
+#         self.outputAllScores = False
+#         self.retain_detections = retain_detections
+#         self.detections = [] if retain_detections else None
 
 #     def find_audio_files(self, folder_path):
 #         return [os.path.join(root, file)
@@ -1400,287 +1886,166 @@ import soundfile as sf
 #             elif self.table_type == "sound":
 #                 f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tLow Freq (Hz)\tHigh Freq (Hz)\tClass\tScore\tSound\n")
 
-#     def load_audio(self, filename):
-#         y, sr = sf.read(filename, dtype='float32')
-#         self.params['inSR'] = sr
-#         return y, sr
+#     def load_audio_chunk(self, filename, chunk_size):
+#         with sf.SoundFile(filename) as sf_file:
+#             self.DataSR = sf_file.samplerate
+#             self.params['inSR'] = self.DataSR
+#             while True:
+#                 y = sf_file.read(frames=chunk_size, dtype='float32', always_2d=False)
+#                 if len(y) == 0:
+#                     break
+#                 yield y, self.DataSR
 
-#     def create_segments(self, y, sr):
+#     def create_segments_streaming(self, y, sr):
 #         segment_length = int(self.segment_duration * sr)
 #         overlap_length = int(self.overlap * sr)
-#         start_time = 0.0
-
-#         for start in range(0, len(y) - segment_length + 1, segment_length - overlap_length):
-#             yield y[start:start + segment_length], start_time
-#             start_time += (segment_length - overlap_length) / sr
+        
+#         start = 0
+#         while start + segment_length <= len(y):
+#             yield y[start:start + segment_length], start / sr
+#             start += segment_length - overlap_length
 
 #     def create_spectrogram(self, y):
-#         expected_time_steps = self.model_input_shape[1] if self.model_input_shape else None
+#         if self._spec_buffer is None:  # Check if buffer is None (instead of directly checking the array)
+#             self._spec_buffer = np.zeros((self.params['nfft'] // 2 + 1, self.model_input_shape[1]), dtype=np.float32)
+        
 #         spectrogram = create_spectrogram(y, return_snr=False, **self.params)
-#         if expected_time_steps and spectrogram.shape[1] < expected_time_steps:
-#             spectrogram = np.pad(spectrogram, 
-#                                   ((0, 0), 
-#                                   (0, expected_time_steps - spectrogram.shape[1])), 
-#                                   ymode='constant')
-#         elif expected_time_steps and spectrogram.shape[1] > expected_time_steps:
-#             spectrogram = spectrogram[:, :expected_time_steps]
-#         return spectrogram
+#         expected_time_steps = self.model_input_shape[1]
+        
+#         if spectrogram.shape[1] < expected_time_steps:
+#             self._spec_buffer[:, :spectrogram.shape[1]] = spectrogram
+#             return self._spec_buffer
+#         return spectrogram[:, :expected_time_steps]
 
-#     def process_segment(self, segment, sr, start_time, filename, filestreamStart):
-#         spectrogram = self.create_spectrogram(segment)
-#         spectrogram = np.expand_dims(spectrogram, axis=0)  # Add batch dimension
-#         predictions = self.model.predict(spectrogram)[0]  # Assuming batch size 1
+#     def process_batch(self, batch_segments, batch_start_times, batch_files):
+#         batch_segments = np.stack(batch_segments)  # Create a batch array
+#         predictions = self.model.predict(batch_segments)  # Model predictions in a batch
 
-#         for class_id, score in enumerate(predictions):
-#             if score >= self.detection_thresholds[class_id]:
-#                 self.output_detection(class_id, score, 
-#                                       start_time+filestreamStart, 
-#                                       start_time + self.segment_duration+filestreamStart,
-#                                       filename)
+#         # Two options for output, kick out all the scores (untraditional) or 
+#         # kick out the scores for the argmax, more traditional
+#         if self.outputAllScores == False:
+            
+#             # Convert to a numerical array
+#             numerical_predictions = np.round(np.array(predictions.tolist()), 3)
+            
+#             for i, row in enumerate(numerical_predictions):
+#                 row = np.array(row, dtype=float)  # Convert the row to a numerical array
+#                 max_class = np.argmax(row)
+#                 max_score = np.max(row)
+#                 startTime = batch_start_times[i]
+#                 stopTime = batch_start_times[i] + self.segment_duration
+                
+#                 if max_score >= self.detection_thresholds[max_class]:
+#                     self.output_detection(
+#                         class_id =max_class, 
+#                         score= max_score,   
+#                         start_time= startTime, 
+#                         end_time= stopTime,
+#                         filename =batch_files[i]
+#                     )
+                    
+#         else: # write out all of the scores above the detection threshold
+#             for i, prediction in enumerate(predictions):
+#                 for class_id, score in enumerate(prediction):
+#                     if score >= self.detection_thresholds[class_id]:
+#                         self.output_detection(
+#                             class_id, score, 
+#                             batch_start_times[i], 
+#                             batch_start_times[i] + self.segment_duration,
+#                             batch_files[i]
+#                         )
+             
+            
 
 #     def output_detection(self, class_id, score, start_time, end_time, filename):
+        
+#         selection = self.detection_counter
+#         class_name = self.class_names[class_id]
+        
 #         self.detection_counter += 1
+#         if self.retain_detections:
+#                detection = {
+#                    "Selection": self.detection_counter + 1,
+#                    "View": "Spectrogram",
+#                    "Channel": 1,
+#                    "Begin Time (S)": start_time,
+#                    "End Time (S)": end_time,
+#                    "Low Freq (Hz)": 0,
+#                    "High Freq (Hz)": 8000,
+#                    "Class": class_name,
+#                    "Score": score,
+#                    "File": filename}
+#                self.detections.append(detection)
+        
 #         with open(self.selection_table_name, 'a') as f:
-#             selection = self.detection_counter
-#             class_name = self.class_names[class_id]
 #             if self.table_type == "selection":
 #                 f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\n")
 #             elif self.table_type == "sound":
 #                 f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\t{filename}\n")
 
+#     def get_detections(self, as_dataframe=True):
+#         '''
+#         # Returns a pandas dataframe of the Raven selection table
+
+#         Parameters
+#         ----------
+#         as_dataframe : TYPE, optional
+#             DESCRIPTION. The default is True.
+
+#         Raises
+#         ------
+#         ValueError
+#             DESCRIPTION.
+
+#         Returns
+#         -------
+#         TYPE
+#             DESCRIPTION.
+
+#         '''
+#         if not self.retain_detections:
+#             raise ValueError("Retention of detections was not enabled. Set retain_detections=True in the constructor.")
+#         return pd.DataFrame(self.detections) if as_dataframe else np.array(self.detections)
+    
 #     def process_all_files(self):
-#         filestreamStart = 0
+#         '''
+        
+
+#         Returns
+#         -------
+#         None.
+
+#         '''
+#         filestreamStart = 0  # Initialize the global start time
+    
 #         for filename in self.audio_files:
 #             print(f"Processing file: {filename}")
-#             y, sr = self.load_audio(filename)
-            
-#             for segment, start_time in self.create_segments(y, sr):
-#                 self.process_segment(segment, sr, start_time, filename, filestreamStart)
-            
-#             filestreamStart = filestreamStart+len(y)/sr
-
-
-
-
-class AudioProcessor5:    
-    def __init__(self, folder_path=None, segment_duration=2.0, overlap=1.0, 
-                  params=None, model=None, detection_thresholds=None,
-                  selection_table_name="detections.txt", class_names=None,
-                  table_type="selection",outputAllScores = False,
-                  retain_detections = True):
-        """
-
-        Parameters
-        ----------
-        folder_path : TYPE, optional
-            DESCRIPTION. The default is None.
-        segment_duration : TYPE, optional
-            DESCRIPTION. The default is 2.0.
-        overlap : Float, optional
-            DESCRIPTION. Seconds of overlap in the audio advancement.
-            The default is 1.0.
-        params : TYPE, optional
-            DESCRIPTION. The default is None.
-        model : TYPE, optional
-            DESCRIPTION. The default is None.
-        detection_thresholds : TYPE, optional
-            DESCRIPTION. The default is None.
-        selection_table_name : TYPE, optional
-            DESCRIPTION. The default is "detections.txt".
-        class_names : TYPE, optional
-            DESCRIPTION. The default is None.
-        table_type : TYPE, optional
-            DESCRIPTION. The default is "selection".
-
-        Returns
-        -------
-        None.
-
-        """
-        self.folder_path = folder_path
-        self.audio_files = self.find_audio_files(folder_path) if folder_path else []
-        self.segment_duration = segment_duration
-        self.overlap = overlap
-        self.params = params if params else {
-            'outSR': 16000,
-            'clipDur': segment_duration,
-            'nfft': 512,
-            'hop_length': 3200,
-            'spec_type': 'mel',
-            'rowNorm': True,
-            'colNorm': True,
-            'rmDCoffset': True,
-            'inSR': None
-        }
-        self.model = model
-        self.model_input_shape = model.input_shape[1:] if model else None
-        self.detection_thresholds = detection_thresholds if detection_thresholds else {
-            class_id: 0.5 for class_id in range(7)
-        }
-        self.class_names = class_names if class_names else {
-            0: 'Abiotic',
-            1: 'BKW',
-            2: 'HW',
-            3: 'NRKW',
-            4: 'Offshore',
-            5: 'SRKW',
-            6: 'Und Bio',
-        }
-        self.selection_table_name = selection_table_name
-        self.table_type = table_type
-        self.init_selection_table()
-        self.detection_counter = 0
-        self._spec_buffer = None  # Buffer for spectrogram optimization
-        self.DataSR = 96000
-        self.outputAllScores = False
-        self.retain_detections = retain_detections
-        self.detections = [] if retain_detections else None
-
-    def find_audio_files(self, folder_path):
-        return [os.path.join(root, file)
-                for root, _, files in os.walk(folder_path)
-                for file in files if file.endswith(('.wav', '.mp3', '.flac', '.ogg'))]
-
-    def init_selection_table(self):
-        with open(self.selection_table_name, 'w') as f:
-            if self.table_type == "selection":
-                f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tLow Freq (Hz)\tHigh Freq (Hz)\tClass\tScore\n")
-            elif self.table_type == "sound":
-                f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tLow Freq (Hz)\tHigh Freq (Hz)\tClass\tScore\tSound\n")
-
-    def load_audio_chunk(self, filename, chunk_size):
-        with sf.SoundFile(filename) as sf_file:
-            self.DataSR = sf_file.samplerate
-            self.params['inSR'] = self.DataSR
-            while True:
-                y = sf_file.read(frames=chunk_size, dtype='float32', always_2d=False)
-                if len(y) == 0:
-                    break
-                yield y, self.DataSR
-
-    def create_segments_streaming(self, y, sr):
-        segment_length = int(self.segment_duration * sr)
-        overlap_length = int(self.overlap * sr)
-        
-        start = 0
-        while start + segment_length <= len(y):
-            yield y[start:start + segment_length], start / sr
-            start += segment_length - overlap_length
-
-    def create_spectrogram(self, y):
-        if self._spec_buffer is None:  # Check if buffer is None (instead of directly checking the array)
-            self._spec_buffer = np.zeros((self.params['nfft'] // 2 + 1, self.model_input_shape[1]), dtype=np.float32)
-        
-        spectrogram = create_spectrogram(y, return_snr=False, **self.params)
-        expected_time_steps = self.model_input_shape[1]
-        
-        if spectrogram.shape[1] < expected_time_steps:
-            self._spec_buffer[:, :spectrogram.shape[1]] = spectrogram
-            return self._spec_buffer
-        return spectrogram[:, :expected_time_steps]
-
-    def process_batch(self, batch_segments, batch_start_times, batch_files):
-        batch_segments = np.stack(batch_segments)  # Create a batch array
-        predictions = self.model.predict(batch_segments)  # Model predictions in a batch
-
-        # Two options for output, kick out all the scores (untraditional) or 
-        # kick out the scores for the argmax, more traditional
-        if self.outputAllScores == False:
-            
-            # Convert to a numerical array
-            numerical_predictions = np.round(np.array(predictions.tolist()), 3)
-            
-            for i, row in enumerate(numerical_predictions):
-                row = np.array(row, dtype=float)  # Convert the row to a numerical array
-                max_class = np.argmax(row)
-                max_score = np.max(row)
-                startTime = batch_start_times[i]
-                stopTime = batch_start_times[i] + self.segment_duration
-                
-                if max_score >= self.detection_thresholds[max_class]:
-                    self.output_detection(
-                        class_id =max_class, 
-                        score= max_score,   
-                        start_time= startTime, 
-                        end_time= stopTime,
-                        filename =batch_files[i]
-                    )
-                    
-        else: # write out all of the scores above the detection threshold
-            for i, prediction in enumerate(predictions):
-                for class_id, score in enumerate(prediction):
-                    if score >= self.detection_thresholds[class_id]:
-                        self.output_detection(
-                            class_id, score, 
-                            batch_start_times[i], 
-                            batch_start_times[i] + self.segment_duration,
-                            batch_files[i]
-                        )
-             
-            
-
-    def output_detection(self, class_id, score, start_time, end_time, filename):
-        
-        selection = self.detection_counter
-        class_name = self.class_names[class_id]
-        
-        self.detection_counter += 1
-        if self.retain_detections:
-               detection = {
-                   "Selection": self.detection_counter + 1,
-                   "View": "Spectrogram",
-                   "Channel": 1,
-                   "Begin Time (S)": start_time,
-                   "End Time (S)": end_time,
-                   "Low Freq (Hz)": 0,
-                   "High Freq (Hz)": 8000,
-                   "Class": class_name,
-                   "Score": score,
-                   "File": filename}
-               self.detections.append(detection)
-        
-        with open(self.selection_table_name, 'a') as f:
-            if self.table_type == "selection":
-                f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\n")
-            elif self.table_type == "sound":
-                f.write(f"{selection}\tSpectrogram\t1\t{start_time:.6f}\t{end_time:.6f}\t0\t8000\t{class_name}\t{score:.4f}\t{filename}\n")
-
-    def get_detections(self, as_dataframe=True):
-        if not self.retain_detections:
-            raise ValueError("Retention of detections was not enabled. Set retain_detections=True in the constructor.")
-        return pd.DataFrame(self.detections) if as_dataframe else np.array(self.detections)
+#             chunk_start_time = 0  # Initialize chunk start time for each file
+#             batch_segments, batch_start_times, batch_files = [], [], []
     
-    def process_all_files(self):
-        filestreamStart = 0  # Initialize the global start time
+#             # Process each audio chunk
+#             for audio_chunk, sr in self.load_audio_chunk(filename, chunk_size=self.DataSR * 15):  # Process 15-second chunks
+#                 for segment, start_time in self.create_segments_streaming(audio_chunk, self.DataSR):
+#                     # Adjust the segment's start time to be relative to the whole filestream
+#                     global_start_time = filestreamStart + chunk_start_time + start_time
+#                     batch_segments.append(self.create_spectrogram(segment))
+#                     batch_start_times.append(global_start_time)
+#                     batch_files.append(filename)
     
-        for filename in self.audio_files:
-            print(f"Processing file: {filename}")
-            chunk_start_time = 0  # Initialize chunk start time for each file
-            batch_segments, batch_start_times, batch_files = [], [], []
+#                     # If batch size is reached, process the batch
+#                     if len(batch_segments) == 32:
+#                         self.process_batch(batch_segments, batch_start_times, batch_files)
+#                         batch_segments, batch_start_times, batch_files = [], [], []
     
-            # Process each audio chunk
-            for audio_chunk, sr in self.load_audio_chunk(filename, chunk_size=self.DataSR * 15):  # Process 15-second chunks
-                for segment, start_time in self.create_segments_streaming(audio_chunk, self.DataSR):
-                    # Adjust the segment's start time to be relative to the whole filestream
-                    global_start_time = filestreamStart + chunk_start_time + start_time
-                    batch_segments.append(self.create_spectrogram(segment))
-                    batch_start_times.append(global_start_time)
-                    batch_files.append(filename)
+#                 # Update chunk_start_time for the next chunk
+#                 chunk_start_time += len(audio_chunk) / sr
     
-                    # If batch size is reached, process the batch
-                    if len(batch_segments) == 32:
-                        self.process_batch(batch_segments, batch_start_times, batch_files)
-                        batch_segments, batch_start_times, batch_files = [], [], []
+#             # Process remaining segments if any
+#             if batch_segments:
+#                 self.process_batch(batch_segments, batch_start_times, batch_files)
     
-                # Update chunk_start_time for the next chunk
-                chunk_start_time += len(audio_chunk) / sr
-    
-            # Process remaining segments if any
-            if batch_segments:
-                self.process_batch(batch_segments, batch_start_times, batch_files)
-    
-            # Update the global filestreamStart after processing the current file
-            filestreamStart += chunk_start_time  # Increment global filestream start time
+#             # Update the global filestreamStart after processing the current file
+#             filestreamStart += chunk_start_time  # Increment global filestream start time
 
 
 
@@ -1688,65 +2053,3 @@ class AudioProcessor5:
     
 # if __name__ == "__main__":
     
-#     # Example how to call
-    
-#     # Load Keras model
-#     folder_path = 'E:\\Malahat\\STN3\\20151028'
-    
-#     # Load Keras model
-#     model_path = 'C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Models\\20200818\\output_resnet18_PECN_melSpec.keras'
-#     model = load_model(model_path)
-
-#     # Spectrogram parameters
-#     AudioParms = {
-#         'clipDur': 2,
-#         'outSR': 16000,
-#         'nfft': 512,
-#         'hop_length': 25,
-#         'spec_type': 'mel',  
-#         'spec_power': 2,
-#         'rowNorm': False,
-#         'colNorm': False,
-#         'rmDCoffset': False,
-#         'inSR': None, 
-#         'PCEN': True,
-#         'fmin': 150
-#     }
-
-#     # Example detection thresholds (adjust as needed)
-#     detection_thresholds = {
-#         0: 0.8,  # Example threshold for class 0
-#         1: 0.8,  # Example threshold for class 1
-#         2: 0.9,  # Example threshold for class 2
-#         3: 0.8,  # Example threshold for class 3
-#         4: 0.8,  # Example threshold for class 4
-#         5: 0.8,  # Example threshold for class 5
-#         6: 0.9   # Example threshold for class 6
-#     }
-
-#     class_names = {
-#         0: 'Abiotic',
-#         1: 'BKW',
-#         2: 'HW',
-#         3: 'NRKW',
-#         4: 'Offshore',
-#         5: 'SRKW',
-#         6: 'Und Bio'
-#     }
-
-    
-    
-#     # Initialize the AudioProcessor with your model and detection thresholds
-#     processor = AudioProcessor2(folder_path=folder_path, model=model,
-#                                detection_thresholds=detection_thresholds, 
-#                                class_names=class_names,
-#                                params= AudioParms,
-#                                table_type="sound",
-#                                overlap=0.25)
-    
-#     # Process all audio files in the directory
-#     processor.process_all_files()
-
-
-
-
