@@ -10,11 +10,11 @@ from keras.models import load_model
 import EcotypeDefs as Eco
 import numpy as np
 import pandas as pd
-
 import matplotlib.pyplot as plt
-
-import numpy as np
-import matplotlib.pyplot as plt
+from sklearn.metrics import auc
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+import statsmodels.api as sm
 
 def plot_one_vs_others_roc(fp_df, all_df, relevant_classes=None, class_colors=None,
                            titleStr="One-vs-Others ROC Curve"):
@@ -87,11 +87,6 @@ def plot_one_vs_others_roc(fp_df, all_df, relevant_classes=None, class_colors=No
     plt.show()
 
     return roc_data
-
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
-
 
 def plot_confusion_matrix(
     data,
@@ -254,9 +249,6 @@ def plot_confusion_matrix(
     # Clean up
     df.drop(columns=["_ThresholdToUse"], inplace=True, errors="ignore")
     return cm_df
-
-
-
 
 def plot_confusion_matrix_multilabel(
     data,
@@ -436,13 +428,9 @@ def plot_confusion_matrix_multilabel(
 
     return cm_df
 
-
-
-
-import statsmodels.api as sm
-
 def plot_logistic_fit_with_cutoffs(data, score_column="Score", 
-                                   class_column="Class", truth_column="Truth"):
+                                   class_column="Class", truth_column="Truth",
+                                   titleStr = ":SRKW"):
     """
     Fits logistic regression models to estimate the probability of correct detection 
     as a function of BirdNET confidence score, following Wood & Kahl (2024).
@@ -498,7 +486,7 @@ def plot_logistic_fit_with_cutoffs(data, score_column="Score",
         plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
     plt.xlabel("BirdNET Confidence Score")
     plt.ylabel("Pr(Correct Detection)")
-    plt.title("Logistic Fit: Confidence Score")
+    plt.title(f"Logistic Fit: Confidence Score {titleStr}")
     plt.legend()
     plt.grid()
 
@@ -508,7 +496,7 @@ def plot_logistic_fit_with_cutoffs(data, score_column="Score",
     plt.plot(logit_range, logit_pred, color="blue", label="Logistic Fit (Logit Score)")
     for i, cutoff in enumerate(logit_cutoffs):
         plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
-    plt.xlabel("Logit of BirdNET Confidence Score")
+    plt.xlabel(f"Logit of BirdNET Confidence Score {titleStr}")
     plt.ylabel("Pr(Correct Detection)")
     plt.title("Logistic Fit: Logit Score")
     plt.legend()
@@ -523,26 +511,17 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
                           titleStr="One-vs-Others Precision–Recall Curve"):
     """
     Generates a One-vs.-Others Precision–Recall curve for each class in the dataset,
-    deriving false positives and true positives internally (no need for fp_df).
+    deriving false positives and true positives internally.
 
     Parameters:
-    - all_df: Full dataset with 'Truth', 'Class', and 'Score' columns, where
-        * 'Class' is the model's predicted label
-        * 'Truth' is the ground-truth label
-        * 'Score' is the confidence score for the predicted label
-    - relevant_classes: Optional list of class names to include in the comparison.
-                       If None, uses all classes in 'all_df'.
-    - class_colors: Optional dictionary mapping class names to specific colors.
-                    If None, uses Matplotlib's default 'tab10' colormap.
+    - all_df: DataFrame containing 'Truth', 'Class', and 'Score' columns.
+    - relevant_classes: List of class names to include in the comparison. If None, uses all classes.
+    - class_colors: Dictionary mapping class names to specific colors.
     - titleStr: Title for the Precision–Recall curve plot.
 
     Returns:
-    - pr_data: Dictionary containing thresholds, precision, and recall arrays for each relevant class.
-               For example: pr_data[cls] = {
-                   'thresholds': [...],
-                   'precision': [...],
-                   'recall': [...]
-               }
+    - pr_data: Dictionary containing precision-recall data for each class.
+    - auc_pr_dict: Dictionary containing AUC-PR values for each class.
     """
 
     # If no classes specified, use all unique ones from 'Class'
@@ -557,50 +536,41 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
     color_map = default_colors if class_colors is None else {**default_colors, **class_colors}
 
     # Define thresholds to sweep over
-    #thresholds =np.sort(np.unique(all_df['Score']))
-    thresholds =np.linspace(0,1,200)
+    thresholds = np.linspace(0, 1, 200)
 
-    # Storage for precision–recall data
+    # Storage for precision–recall data and AUC-PR values
     pr_data = {}
+    auc_pr_dict = {}  # Separate dictionary for AUC-PR values
 
     plt.figure(figsize=(8, 6))
 
     for cls in relevant_classes:
-        # Filter out only rows for relevant_classes in the ground truth
-        #df_filtered = all_df[all_df['Truth'].isin(relevant_classes)].copy()
-
-        # Define "false-positives" subset: predicted label == cls, but truth != cls
-        fpData = all_df[(all_df['Class'] == cls) & 
-                             (all_df['Truth'] != cls)].copy()
-
-        # Define "true-positives" subset: truth == cls (we'll check predictions below)
-        tpData = all_df[all_df['Truth'] == cls].copy()
-
         precision_list, recall_list = [], []
+    
+        # Binary masks for positive class (truth)
+        is_truth_cls = all_df['Truth'] == cls
 
         for threshold in thresholds:
-            # Mark each row as "Predicted" if Score >= threshold
-            # For TP data, require that the model predicted exactly cls
-            tpData['Predicted'] = (tpData[cls] >= threshold) 
-            # For FP data, the row is already known to have Class=cls but is not truly cls;
-            # we just check if Score >= threshold
-            fpData['Predicted'] = fpData[cls] >= threshold
-
-            # Counts for this threshold
-            true_positive_count = tpData['Predicted'].sum()
-            false_positive_count = fpData['Predicted'].sum()
-            false_negative_count = len(tpData) - true_positive_count
-
-            # Precision = TP / (TP + FP)
-            tp_fp_sum = true_positive_count + false_positive_count
-            precision_val = (true_positive_count / tp_fp_sum) if tp_fp_sum > 0 else 1.0
-
-            # Recall = TP / (TP + FN)
-            tp_fn_sum = true_positive_count + false_negative_count
-            recall_val = (true_positive_count / tp_fn_sum) if tp_fn_sum > 0 else 0.0
-
-            precision_list.append(precision_val)
-            recall_list.append(recall_val)
+            # TP: Correct predictions above threshold
+            TP = ((is_truth_cls) & (all_df[cls] >= threshold)).sum()
+    
+            # FP: Incorrect predictions above threshold
+            FP = ((~is_truth_cls) & (all_df[cls] >= threshold)).sum()
+    
+            # FN: Missed positives (either wrong class or too low score)
+            FN = (is_truth_cls & (all_df[cls] < threshold)).sum()
+    
+            # Precision calculation
+            precision = TP / (TP + FP) if (TP + FP) > 0 else 1.0
+    
+            # Recall calculation
+            recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+    
+            precision_list.append(precision)
+            recall_list.append(recall)
+        
+        # Compute area under PR curve (AUC-PR)
+        auc_pr = auc(recall_list, precision_list)
 
         # Store results
         pr_data[cls] = {
@@ -609,8 +579,12 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
             'recall': np.array(recall_list)
         }
 
+        # Store AUC-PR in a separate dictionary
+        auc_pr_dict[cls] = auc_pr
+
         # Plot Precision–Recall curve
-        plt.plot(recall_list, precision_list, label=cls, color=color_map.get(cls, "black"))
+        plt.plot(recall_list, precision_list, label=cls, 
+                 color=color_map.get(cls, "black"))
 
     plt.xlabel("Recall")
     plt.ylabel("Precision")
@@ -619,7 +593,8 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
     plt.grid()
     plt.show()
 
-    return pr_data
+    return pr_data, auc_pr_dict  # Return both dictionaries
+
 
 def find_cutoff(model, coef_index):
     return (np.log([0.90 / 0.10, 0.95 / 0.05, 0.99 / 0.01]) - model.params[0]) / model.params[coef_index]
@@ -2110,6 +2085,9 @@ cm_df = plot_confusion_matrix(ALLData_birdnet03, threshold=0.5)
 # als 48k, not 16k/ 
 ###########################################################################
 
+model_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG.tflite"
+label_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG_Labels.txt"
+
 
 # Humpback data 
 MN_testData_birdNet4 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNet\\Backgrd_mn_srkw_tkw_okw_6k\\\\FPAnalysis\\ONCFix_HW_BirdNET_CombinedTable.csv')
@@ -2225,6 +2203,111 @@ roc_results_04 = plot_one_vs_others_roc(FPData_birdnet04,
 
 # Example usage: Plot confusion matrix for ALLData_birdnet04
 cm_df = plot_confusion_matrix(ALLData_birdnet04, threshold=0.5)
+
+processor = Eco.BirdNetPredictor(model_path, label_path, Background_DCLDE_clips)
+BG_testData_DCLDE_birdnet4, DCLDE_BG_birdnet04 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_BG_birdnet04['Class'] = DCLDE_BG_birdnet04[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_BG_birdnet04['Truth']= 'Backgorund'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, MN_DCLDE_clips)
+HW_testData_DCLDE_birdnet4, DCLDE_HW_birdnet04 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_HW_birdnet04['Class'] = DCLDE_HW_birdnet04[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_HW_birdnet04['Truth']= 'HW'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, SRKW_DCLDE_clips)
+RKW_testData_DCLDE_birdnet4, DCLDE_srkw_birdnet04 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_srkw_birdnet04['Class'] = DCLDE_srkw_birdnet04[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_srkw_birdnet04['Truth']= 'SRKW'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, TKW_DCLDE_clips)
+TKW_DCLDE_Data_birdnet4, DCLDE_tkw_birdnet04 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_tkw_birdnet04['Class'] = DCLDE_tkw_birdnet04[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_tkw_birdnet04['Truth']= 'TKW'
+
+
+processor = Eco.BirdNetPredictor(model_path, label_path, OKW_DCLDE_clips)
+OKW_testData_DCLDE_birdnet4, DCLDE_OKW_birdnet04 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_OKW_birdnet04['Class'] = DCLDE_OKW_birdnet04[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_OKW_birdnet04['Truth']= 'OKW'
+
+#%% Birdnet 4 DCLDE Eval Metrics
+
+EvalDat_DCLDE_04  = pd.concat([
+    DCLDE_srkw_birdnet04, 
+    DCLDE_tkw_birdnet04, 
+    DCLDE_HW_birdnet04,
+    DCLDE_OKW_birdnet04,
+    DCLDE_BG_birdnet04 ])
+
+EvalDat_DCLDE_04['Score'] = EvalDat_DCLDE_04.apply(lambda row: row[row['Class']], axis=1)
+
+EvalDat_DCLDE_04['FP'] = EvalDat_DCLDE_04['Class'] !=  EvalDat_DCLDE_04['Truth']
+FPData_DCLDEbirdnet04= EvalDat_DCLDE_04[EvalDat_DCLDE_04['FP'] == True]
+
+# Get the 90% probability thresholds
+logitHW, bb =plot_logistic_fit_with_cutoffs(DCLDE_HW_birdnet04, score_column="HW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :Humpback')
+HW_90_cutoff = find_cutoff(logitHW, 1)[0]# 95th percentile 
+
+
+
+logitTKW, bb = plot_logistic_fit_with_cutoffs(DCLDE_tkw_birdnet04, score_column="TKW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :TKW')
+TKW_90_cutoff = find_cutoff(logitTKW, 1)[0] # 95th percentile 
+
+
+logitSRKW, bb = plot_logistic_fit_with_cutoffs(DCLDE_srkw_birdnet04, score_column="SRKW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :SRKW')
+SRKW_90_cutoff = find_cutoff(logitSRKW, 1)[0]# 95th percentile 
+
+# aa, bb = plot_logistic_fit_with_cutoffs(DCLDE_OKW_birdnet04, score_column="OKW", 
+#                                    class_column="Class", truth_column="Truth")
+# OKW_90_cutoff = find_cutoff(aa, 1)[0]# 95th percentile 
+
+
+
+# Using a dictionary threshold:
+custom_thresholds = {
+    "SRKW": SRKW_90_cutoff,
+    "TKW": TKW_90_cutoff,
+    'HW':HW_90_cutoff,
+    'OKW': .8}
+
+
+pr_data_birdnet04 = plot_one_vs_others_pr(EvalDat_DCLDE_04,
+                      relevant_classes=['SRKW', 'TKW', 'OKW', 'HW'], 
+                      class_colors=None,
+                      titleStr="One-vs-Others Precision–Recall DCLDE Curve Birdnet04")
+
+
+class_colors = {
+    'SRKW': '#1f77b4',   # Blue
+    'TKW': '#ff7f0e',   # Orange
+    'HW': '#2ca02c',  # Green
+    'OKW':'#e377c2'}   
+
+
+relevant_classes = ['SRKW', 'TKW', 'OKW', 'HW']
+roc_results_04 = plot_one_vs_others_roc(FPData_DCLDEbirdnet04,  
+                                     EvalDat_DCLDE_04,
+                                     #relevant_classes = relevant_classes,
+                                     titleStr= "One-vs-Others ROC Birdnet 6", 
+                                     class_colors= class_colors)
+
+
+cm_df = plot_confusion_matrix(EvalDat_DCLDE_04, threshold=custom_thresholds)
+
+
+
+plot_confusion_matrix_multilabel(
+    data = EvalDat_DCLDE_04,
+    score_cols=["SRKW", "TKW", "HW", 'OKW'],
+    truth_column="Truth",
+    threshold=custom_thresholds)
+
 
 
 #%% Birdnet 5 birdnet Class
@@ -2383,7 +2466,13 @@ UNK_bio_folder = 'C:/TempData\\DCLDE_EVAL\\SanctSound\\UnkBio\\'
 MN_bio_folder = 'C:/TempData\\DCLDE_EVAL\\SanctSound\\Humpback\\' 
 AB_bio_folder = 'C:/TempData\\DCLDE_EVAL\\SanctSound\\Abiotic\\' 
 
-
+# DCLDE non-training datasets
+MN_DCLDE_clips = 'C:\\TempData\\threeSecClips_non_training_TKWCalls_fixed\\HW\\'
+TKW_DCLDE_clips = 'C:\\TempData\\threeSecClips_non_training_TKWCalls_fixed\\TKW\\'
+SRKW_DCLDE_clips = 'C:\\TempData\\threeSecClips_non_training_TKWCalls_fixed\\SRKW\\'
+OKW_DCLDE_clips = 'C:\\TempData\\threeSecClips_non_training_TKWCalls_fixed\\OKW\\'
+Background_DCLDE_clips = 'C:\\TempData\\threeSecClips_non_training_TKWCalls_fixed\\Background\\'
+    
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Model and labels
@@ -2396,6 +2485,117 @@ audio_folder = 'C:\\TempData\\DCLDE_EVAL\\SMRU\\Audio\\SMRU_test\\'
 
 output_csv = "predictions_output.csv"
 
+
+
+#%% Birdnet 6 DCLDE Eval Processing
+
+processor = Eco.BirdNetPredictor(model_path, label_path, Background_DCLDE_clips)
+BG_testData_DCLDE_birdnet6, DCLDE_BG_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_BG_birdnet06['Class'] = DCLDE_BG_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_BG_birdnet06['Truth']= 'Backgorund'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, MN_DCLDE_clips)
+HW_testData_DCLDE_birdnet6, DCLDE_HW_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_HW_birdnet06['Class'] = DCLDE_HW_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_HW_birdnet06['Truth']= 'HW'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, SRKW_DCLDE_clips)
+RKW_testData_DCLDE_birdnet6, DCLDE_srkw_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_srkw_birdnet06['Class'] = DCLDE_srkw_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_srkw_birdnet06['Truth']= 'SRKW'
+
+processor = Eco.BirdNetPredictor(model_path, label_path, TKW_DCLDE_clips)
+TKW_DCLDE_Data_birdnet6, DCLDE_tkw_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_tkw_birdnet06['Class'] = DCLDE_tkw_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_tkw_birdnet06['Truth']= 'TKW'
+
+
+processor = Eco.BirdNetPredictor(model_path, label_path, OKW_DCLDE_clips)
+OKW_testData_DCLDE_birdnet6, DCLDE_OKW_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+DCLDE_OKW_birdnet06['Class'] = DCLDE_OKW_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
+DCLDE_OKW_birdnet06['Truth']= 'OKW'
+
+#%% Birdnet 6 DCLDE Eval Metrics
+
+EvalDat_DCLDE  = pd.concat([
+    DCLDE_srkw_birdnet06, 
+    DCLDE_tkw_birdnet06, 
+    DCLDE_HW_birdnet06,
+    DCLDE_OKW_birdnet06,
+    DCLDE_BG_birdnet06 ])
+
+EvalDat_DCLDE['Score'] = EvalDat_DCLDE.apply(lambda row: row[row['Class']], axis=1)
+
+EvalDat_DCLDE['FP'] = EvalDat_DCLDE['Class'] !=  EvalDat_DCLDE['Truth']
+FPData_DCLDEbirdnet06= EvalDat_DCLDE[EvalDat_DCLDE['FP'] == True]
+
+# Get the 90% probability thresholds
+logitHW, bb =plot_logistic_fit_with_cutoffs(DCLDE_HW_birdnet06, score_column="HW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :Humpback')
+HW_90_cutoff = find_cutoff(logitHW, 1)[0]# 95th percentile 
+
+
+
+logitTKW, bb = plot_logistic_fit_with_cutoffs(DCLDE_tkw_birdnet06, score_column="TKW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :TKW')
+TKW_90_cutoff = find_cutoff(logitTKW, 1)[0] # 95th percentile 
+
+
+logitSRKW, bb = plot_logistic_fit_with_cutoffs(DCLDE_srkw_birdnet06, score_column="SRKW", 
+                                   class_column="Class", truth_column="Truth", 
+                                   titleStr= ' :SRKW')
+SRKW_90_cutoff = find_cutoff(logitSRKW, 1)[0]# 95th percentile 
+
+# aa, bb = plot_logistic_fit_with_cutoffs(DCLDE_OKW_birdnet06, score_column="OKW", 
+#                                    class_column="Class", truth_column="Truth")
+# OKW_90_cutoff = find_cutoff(aa, 1)[0]# 95th percentile 
+
+
+
+# Using a dictionary threshold:
+custom_thresholds = {
+    "SRKW": SRKW_90_cutoff,
+    "TKW": TKW_90_cutoff,
+    'HW':HW_90_cutoff,
+    'OKW': .8}
+
+
+plot_one_vs_others_pr(EvalDat_DCLDE,
+                      relevant_classes=['SRKW', 'TKW', 'OKW', 'HW'], 
+                      class_colors=None,
+                      titleStr="One-vs-Others Precision–Recall DCLDE Curve")
+
+
+class_colors = {
+    'SRKW': '#1f77b4',   # Blue
+    'TKW': '#ff7f0e',   # Orange
+    'HW': '#2ca02c',  # Green
+    'OKW':'#e377c2'}   
+
+
+relevant_classes = ['SRKW', 'TKW', 'OKW', 'HW']
+roc_results_06 = plot_one_vs_others_roc(FPData_DCLDEbirdnet06,  
+                                     EvalDat_DCLDE,
+                                     #relevant_classes = relevant_classes,
+                                     titleStr= "One-vs-Others ROC Birdnet 6", 
+                                     class_colors= class_colors)
+
+
+cm_df = plot_confusion_matrix(EvalDat_DCLDE, threshold=custom_thresholds)
+
+
+
+plot_confusion_matrix_multilabel(
+    data = EvalDat_DCLDE,
+    score_cols=["SRKW", "TKW", "HW", 'OKW'],
+    truth_column="Truth",
+    threshold=custom_thresholds)
+
+
+#%% Birdnet 6 Malahat Processing
+# Figure out the false positives
 # Batch process audio files in folder and export to CSV
 processor = Eco.BirdNetPredictor(model_path, label_path, AB_bio_folder)
 AB_testData_birdnet6 = processor.batch_process_audio_folder(output_csv)
@@ -2405,16 +2605,18 @@ TKW_testData_birdnet6, Malahat_tkw_birdnet06 = processor.batch_process_audio_fol
 Malahat_tkw_birdnet06['Class'] = Malahat_tkw_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
 Malahat_tkw_birdnet06['Truth']= 'TKW'
 
+
 processor = Eco.BirdNetPredictor(model_path, label_path, malahatSRKW_folder)
 RKW_testData_Malahat_birdnet6, Malahat_srkw_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
 Malahat_srkw_birdnet06['Class'] = Malahat_srkw_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
 Malahat_srkw_birdnet06['Truth']= 'SRKW'
 
+
+
 processor = Eco.BirdNetPredictor(model_path, label_path, malahatHW_folder)
 HW_testData_Malahat_birdnet6, Malahat_HW_birdnet06 = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
 Malahat_HW_birdnet06['Class'] = Malahat_HW_birdnet06[['SRKW','OKW', 'HW', 'TKW' ]].idxmax(axis=1)
 Malahat_HW_birdnet06['Truth']= 'HW'
-
 
 
 
@@ -2427,12 +2629,6 @@ UNDBIO_testData_birdnet6 = processor.batch_process_audio_folder(output_csv)
 
 processor = Eco.BirdNetPredictor(model_path, label_path, MN_bio_folder)
 MN_testData_birdnet6 = processor.batch_process_audio_folder(output_csv)
-
-
-
-#%%
-# Figure out the false positives
-
 MN_testData_birdnet6['FP'] = MN_testData_birdnet6['Class'] != 'HW'
 MN_testData_birdnet6['Class'].value_counts()
 MN_testData_birdnet6['Truth'] = 'HW' 
@@ -2480,19 +2676,19 @@ class_colors = {
     'SRKW': '#1f77b4',   # Blue
     'TKW': '#ff7f0e',   # Orange
     'HW': '#2ca02c',  # Green
-    'UndBio':'#e377c2'}   
+    'OKW':'#e377c2'}   
 
 
-relevant_classes = ['SRKW', 'TKW']
+relevant_classes = ['SRKW', 'TKW','HW']
 roc_results_06 = plot_one_vs_others_roc(FPData_birdnet06,  
                                      ALLData_birdnet06,
                                      #relevant_classes = relevant_classes,
-                                     titleStr= "One-vs-Others ROC Birdnet 6", 
+                                     titleStr= "One-vs-Others ROC Birdnet 6 Malahat", 
                                      class_colors= class_colors)
 
 
 
-#%%
+#%% Birdnet 6 Malahat Eval Metrics
 # To show recall
 
 Malahat_srkw_birdnet06['Score'] = Malahat_srkw_birdnet06['SRKW']
@@ -2504,18 +2700,18 @@ Malahat_HW_birdnet06['Score'] = Malahat_HW_birdnet06['HW']
 # Get the 90% probability thresholds
 aa, bb =plot_logistic_fit_with_cutoffs(Malahat_HW_birdnet06, score_column="HW", 
                                    class_column="Class", truth_column="Truth")
-HW_90_cutoff = find_cutoff(aa, 1)[1]# 95th percentile 
+HW_90_cutoff = find_cutoff(aa, 1)[0]# 95th percentile 
 
 
 
 aa, bb = plot_logistic_fit_with_cutoffs(Malahat_tkw_birdnet06, score_column="TKW", 
                                    class_column="Class", truth_column="Truth")
-TKW_90_cutoff = find_cutoff(aa, 1)[1] # 95th percentile 
+TKW_90_cutoff = find_cutoff(aa, 1)[0] # 95th percentile 
 
 
 aa, bb = plot_logistic_fit_with_cutoffs(Malahat_srkw_birdnet06, score_column="SRKW", 
                                    class_column="Class", truth_column="Truth")
-SRKW_90_cutoff = find_cutoff(aa, 1)[1]# 95th percentile 
+SRKW_90_cutoff = find_cutoff(aa, 1)[0]# 95th percentile 
 
 
 # Using a dictionary threshold:
@@ -2534,6 +2730,7 @@ plot_one_vs_others_pr(EvalDat,
                       relevant_classes=['SRKW', 'TKW', 'HW'], class_colors=None,
                           titleStr="One-vs-Others Precision–Recall Curve")
 
+cm_df = plot_confusion_matrix(EvalDat, threshold=0)
 
 cm_df = plot_confusion_matrix(EvalDat, threshold=custom_thresholds)
 
@@ -2548,7 +2745,7 @@ EvalDat['FP'] =  EvalDat['Truth'] != EvalDat['Class']
 FPData_EvalDat = EvalDat[EvalDat['FP'] == True]
 plot_one_vs_others_roc(FPData_EvalDat,  
                                      EvalDat,
-                                     #relevant_classes = relevant_classes,
+                                     relevant_classes = relevant_classes,
                                      titleStr= "One-vs-Others ROC Birdnet 6", 
                                      class_colors= class_colors)
 
@@ -2556,8 +2753,16 @@ plot_one_vs_others_roc(FPData_EvalDat,
 cm_df = plot_confusion_matrix(EvalDat, threshold=custom_thresholds)
 
 
+#############################################################################
+# combine all
+############################################################################
+AllEval  = pd.concat([EvalDat, EvalDat_DCLDE])
+FPData_AllEval = AllEval[AllEval['FP'] == True]
 
-
+plot_one_vs_others_pr(AllEval,
+                      relevant_classes=['SRKW', 'TKW', 'HW'], class_colors=None,
+                          titleStr="One-vs-Others Precision–Recall Curve")
+cm_df = plot_confusion_matrix(AllEval, threshold=custom_thresholds)
 
 
 #%% Birdnet 7 birdnet Class
@@ -2815,11 +3020,11 @@ raven_file = 'C://TempData\\DCLDE_EVAL\\Malahat_JASCO\\Annotations\\BirdnetDetec
 ####################################################################
 import os
 # Model and labels
-model_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Bckrnd_mn_srkw_tkw_offshore_TKW_balanced_4k\\CustomClassifier_100_calls_Balanced_calltypes.tflite"
-label_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Bckrnd_mn_srkw_tkw_offshore_TKW_balanced_4k\\CustomClassifier_100_calls_Balanced_calltypes_Labels.txt"
+model_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\fix_mn_srkw_offshore_tkw_balanced_4k\\Output\\CustomClassifier_8khz.tflite"
+label_path = "C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\fix_mn_srkw_offshore_tkw_balanced_4k\\Output\\CustomClassifier_8khz_Labels.txt"
 
 # Example usage
-audio_folder = 'C:\\TempData\\BirdNet5class_balacedTKWCalls'
+audio_folder = 'C:\\TempData\\BirdNet5class_balacedTKWCalls_fixed\\'
 
 
 output_csv = "TrainigDataPredictions.csv"
@@ -2845,7 +3050,7 @@ new_base_folder = r"C:\TempData\BirdNet5class_balacedTKWCalls_hardExamples"
 # Iterate over the incorrect predictions and copy files
 for _, row in wrongDf.iterrows():
     old_path = row["FilePath"]  # Original file path
-    class_name = row["Class"]  # Subfolder (class name)
+    class_name = row["truth"]  # Subfolder (class name)
     
     # Define new path (keeping subfolder structure)
     new_folder = os.path.join(new_base_folder, class_name)

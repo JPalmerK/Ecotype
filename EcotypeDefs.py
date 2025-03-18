@@ -1592,12 +1592,6 @@ import librosa
 import scipy.special
 from tensorflow import lite as tflite  # Using TensorFlow's built-in lite interpreter
 
-import os
-import numpy as np
-import pandas as pd
-import librosa
-import scipy.special
-from tensorflow import lite as tflite  # Using TensorFlow's built-in lite interpreter
 
 class BirdNetPredictor:
     def __init__(self, model_path, label_path, audio_folder, 
