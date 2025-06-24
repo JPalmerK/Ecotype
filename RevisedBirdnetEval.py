@@ -92,9 +92,10 @@ def plot_one_vs_others_roc(fp_df, all_df, relevant_classes=None, class_colors=No
 def plot_confusion_matrix(
     data,
     threshold=0.5,
-    class_column="Class",
+    class_column="Predicted Class",
     score_column="Score",
-    truth_column="Truth"):
+    truth_column="Truth",
+    titleStr = 'Model x'):
     """
     Plots a confusion matrix (rows = predicted, columns = true) based on a 
     given threshold (float or dict), annotating the diagonal cells with recall.
@@ -244,19 +245,19 @@ def plot_confusion_matrix(
 
     plt.ylabel("Predicted Class")
     plt.xlabel("True Class")
-    plt.title("Flipped Confusion Matrix (Predicted = Rows, Truth = Columns)")
+    plt.title(titleStr)
     plt.show()
 
     # Clean up
     df.drop(columns=["_ThresholdToUse"], inplace=True, errors="ignore")
     return cm_df
 
-
 def plot_confusion_matrix_multilabel(
     data,
     score_cols,
     truth_column="Truth",
-    threshold=0.5):
+    threshold=0.5,
+    titleStr = 'Model x'):
     """
     Plots a confusion matrix for a multi-label classifier that outputs scores
     for multiple classes in each row. One row can surpass thresholds for more
@@ -425,14 +426,14 @@ def plot_confusion_matrix_multilabel(
 
     ax.set_xlabel("Predicted Class")
     ax.set_ylabel("True Class")
-    ax.set_title("Multi-Label Confusion Matrix (Row/Col Order = score_cols)")
+    ax.set_title(titleStr)
     plt.show()
 
     return cm_df
 
 def plot_logistic_fit_with_cutoffs(data, score_column="Score", 
-                                   class_column="Class", truth_column="Truth",
-                                   titleStr = ":SRKW"):
+                                   class_column="Predicted Class", truth_column="Truth",
+                                   titleStr = ":SRKW", plotLogit= False):
     """
     Fits logistic regression models to estimate the probability of correct detection 
     as a function of BirdNET confidence score, following Wood & Kahl (2024).
@@ -477,37 +478,38 @@ def plot_logistic_fit_with_cutoffs(data, score_column="Score",
 
     conf_cutoffs = find_cutoff(conf_model, 1)
     logit_cutoffs = find_cutoff(logit_model, 1)
-
-    # Plot Confidence Score Model
-    plt.figure(figsize=(12, 5))
     
-    plt.subplot(1, 2, 1)
-    sns.scatterplot(x=data[score_column], y=data["Correct"], alpha=0.3, label="Observations")
-    plt.plot(conf_range, conf_pred, color="red", label="Logistic Fit (Confidence Score)")
-    for i, cutoff in enumerate(conf_cutoffs):
-        plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
-    plt.xlabel("BirdNET Confidence Score")
-    plt.ylabel("Pr(Correct Detection)")
-    plt.title(f"Logistic Fit: Confidence Score {titleStr}")
-    plt.legend()
-    plt.grid()
+    if plotLogit:
 
-    # Plot Logit Score Model
-    plt.subplot(1, 2, 2)
-    sns.scatterplot(x=data["Logit_Score"], y=data["Correct"], alpha=0.3, label="Observations")
-    plt.plot(logit_range, logit_pred, color="blue", label="Logistic Fit (Logit Score)")
-    for i, cutoff in enumerate(logit_cutoffs):
-        plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
-    plt.xlabel(f"Logit of BirdNET Confidence Score {titleStr}")
-    plt.ylabel("Pr(Correct Detection)")
-    plt.title("Logistic Fit: Logit Score")
-    plt.legend()
-    plt.grid()
-
-    plt.show()
+        # Plot Confidence Score Model
+        plt.figure(figsize=(12, 5))
+        
+        plt.subplot(1, 2, 1)
+        sns.scatterplot(x=data[score_column], y=data["Correct"], alpha=0.3, label="Observations")
+        plt.plot(conf_range, conf_pred, color="red", label="Logistic Fit (Confidence Score)")
+        for i, cutoff in enumerate(conf_cutoffs):
+            plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
+        plt.xlabel("BirdNET Confidence Score")
+        plt.ylabel("Pr(Correct Detection)")
+        plt.title(f"Logistic Fit: Confidence Score {titleStr}")
+        plt.legend()
+        plt.grid()
+    
+        # Plot Logit Score Model
+        plt.subplot(1, 2, 2)
+        sns.scatterplot(x=data["Logit_Score"], y=data["Correct"], alpha=0.3, label="Observations")
+        plt.plot(logit_range, logit_pred, color="blue", label="Logistic Fit (Logit Score)")
+        for i, cutoff in enumerate(logit_cutoffs):
+            plt.axvline(cutoff, linestyle="--", color=["orange", "red", "magenta"][i], label=f"p={0.9 + i*0.05:.2f}")
+        plt.xlabel(f"Logit of BirdNET Confidence Score {titleStr}")
+        plt.ylabel("Pr(Correct Detection)")
+        plt.title("Logistic Fit: Logit Score")
+        plt.legend()
+        plt.grid()
+    
+        plt.show()
 
     return conf_model, logit_model
-
 
 def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
                           titleStr="One-vs-Others Precision–Recall Curve"):
@@ -530,6 +532,8 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
     # If no classes specified, use all unique ones from 'Class'
     if relevant_classes is None:
         relevant_classes = np.unique(all_df['Class'])
+        
+    truthClasses = np.unique(all_df['Truth'])
 
     # Assign a color to each class if not provided
     default_colors = {
@@ -540,6 +544,7 @@ def plot_one_vs_others_pr(all_df, relevant_classes=None, class_colors=None,
 
     # Define thresholds to sweep over
     thresholds = np.linspace(0, 1, 200)
+    #thresholds = np.unique(all_df['Top Score'])
 
     # Storage for precision–recall data and AUC-PR values
     pr_data = {}
@@ -608,48 +613,69 @@ def find_cutoff(model, coef_index):
 
 def process_dataset(model_path, label_path, audio_folder, truth_label,
                     output_csv="predictions_output.csv", 
-                    return_scores=True, classes=['SRKW','OKW','HW','TKW']):
+                    return_scores=True, 
+                    classes=['SRKW','OKW','HW','TKW'],
+                    thresh=0):
     """
     Process an audio folder using Eco.BirdNetPredictor.
     Returns a DataFrame with raw scores, the predicted class (as the max among classes),
     and a 'Truth' column set to the given truth_label.
     """
-    processor = Eco.BirdNetPredictor(model_path, label_path, audio_folder)
-    if return_scores:
-        df, scores = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
-        scores['Class'] = scores[classes].idxmax(axis=1)
-        scores['Truth'] = truth_label
-        return scores
-    else:
-        return processor.batch_process_audio_folder(output_csv)
+    processor = Eco.BirdNetPredictor(model_path, label_path, audio_folder, confidence_thresh=thresh)
+    df = processor.batch_process_audio_folder(output_csv, return_raw_scores=True)
+    return df
+    #df['Class_Est'] = df[classes].idxmax(axis=1)
+    
+    
+    # if return_scores:
+    #     df, scores = processor.batch_process_audio_folder(output_csv, 
+    #                                                       return_raw_scores=True)
+    #     scores['Class_Est'] = scores[classes].idxmax(axis=1)
+    #     scores['Truth'] = truth_label
+    #     return scores
+    # else:
+    #     return processor.batch_process_audio_folder(output_csv)
 
-def process_multiple_datasets(model_path, label_path, folder_truth_map, output_csv="predictions_output.csv", 
-                              classes=['SRKW','OKW','HW','TKW']):
+def process_multiple_datasets(model_path, label_path, folder_truth_map,
+                              output_csv="predictions_output.csv", 
+                              classes=['SRKW','OKW','HW','TKW'], 
+                              thresh = 0):
     """
     Process multiple datasets defined by a dictionary mapping truth labels to folder paths.
     Returns a combined DataFrame.
+    
+    allPreds: logical, whether to threshold 
     """
     datasets = []
     for truth, folder in folder_truth_map.items():
         df = process_dataset(model_path, label_path, folder, truth,
-                             output_csv=output_csv, classes=classes)
+                             output_csv=output_csv, classes=classes,
+                             thresh=thresh)
         datasets.append(df)
     return pd.concat(datasets, ignore_index=True)
 
-def compute_threshold(data, score_column, title_suffix=""):
+def compute_threshold(data, score_column, class_column, plotLogit = False, 
+                      title_suffix=""):
     """
     Compute a threshold cutoff for a given class using a logistic fit.
     (Assumes plot_logistic_fit_with_cutoffs and find_cutoff are available.)
+    
+    Returns the 90th percentile
     """
-    logit, _ = plot_logistic_fit_with_cutoffs(data, score_column=score_column, 
-                                              class_column="Class", truth_column="Truth", 
-                                              titleStr=title_suffix)
+    logit, _ = plot_logistic_fit_with_cutoffs(data, 
+                                              score_column=score_column, 
+                                              class_column=class_column,
+                                              truth_column="Truth", 
+                                              titleStr=title_suffix,
+                                              plotLogit=plotLogit)
     cutoff = find_cutoff(logit, 1)[0]
     return cutoff
 
-def evaluate_model(eval_df, custom_thresholds, 
+def evaluate_model(eval_df, 
+                   custom_thresholds, 
                    pr_title="Precision–Recall Curve", 
-                   roc_title="ROC Curve", plotPR = True, 
+                   roc_title="ROC Curve", 
+                   plotPR = True, 
                    plotROC= False):
     """
     Given an evaluation DataFrame and custom thresholds, compute scores,
@@ -657,9 +683,11 @@ def evaluate_model(eval_df, custom_thresholds,
     Returns the confusion matrix DataFrame.
     """
     # Compute score for each row based on its predicted class
-    eval_df['Score'] = eval_df.apply(lambda row: row[row['Class']], axis=1)
+    eval_df['Score'] = eval_df.apply(lambda row: row[row['Predicted Class']], axis=1)
+    
+    
     # Mark false positives
-    eval_df['FP'] = eval_df['Class'] != eval_df['Truth']
+    eval_df['FP'] = eval_df['Predicted Class'] != eval_df['Truth']
     fp_data = eval_df[eval_df['FP']]
     
     metrics = dict({})
@@ -677,11 +705,14 @@ def evaluate_model(eval_df, custom_thresholds,
     
 
     if plotROC:
-        plot_one_vs_others_roc(fp_data, eval_df, titleStr=roc_title, 
+        plot_one_vs_others_roc(fp_data, eval_df,
+                               titleStr=roc_title, 
                                class_colors=class_colors)
     
     # Plot and return confusion matrix
-    cm_df = plot_confusion_matrix(eval_df, threshold=custom_thresholds)
+    cm_df = plot_confusion_matrix(eval_df,
+                                  threshold=custom_thresholds,
+                                    titleStr =roc_title)
     metrics['cm']= cm_df
     
     
@@ -733,32 +764,39 @@ if __name__ == "__main__":
     
 
     try:
-        eval_dclde_birdnet_06 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz.csv')
+        eval_dclde_birdnet_06 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz_May2025.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
             eval_dclde_birdnet_06 = process_multiple_datasets(
                 model_config_06["model_path"],
                 model_config_06["label_path"], 
-                dclde_folders, output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz.csv')
+                dclde_folders, 
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz_May2025.csv')
             
-            eval_dclde_birdnet_06.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz.csv', index=False)
+            eval_dclde_birdnet_06.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_06_8khz_May2025.csv', index=False)
     try:
-        eval_malahat_birdnet_06 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz.csv')
+        eval_malahat_birdnet_06 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz_May2025.csv')
         classes=['SRKW','OKW','HW','TKW']
-        eval_malahat_birdnet_06['Class'] = eval_malahat_birdnet_06[classes].idxmax(axis=1)
+
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_06 = process_multiple_datasets(
             model_config_06["model_path"], 
             model_config_06["label_path"], 
-            malahat_folders, output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz.csv', 
-            classes=['SRKW','HW','TKW'])  
-        eval_dclde_birdnet_06.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz.csv', index=False)
+            malahat_folders, 
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz_May2025.csv', 
+            classes=['SRKW','OKW','HW','TKW'])  
+        eval_malahat_birdnet_06.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_06_8khz_May2025.csv', index=False)
         
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "HW"], score_column="HW", title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "TKW"], score_column="TKW", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "SRKW"], score_column="SRKW", title_suffix="SRKW")
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "HW"],
+                                    score_column="HW",  
+                                    class_column="Predicted Class",  
+                                    title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "TKW"], 
+                                    score_column="TKW", class_column="Predicted Class", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_06[eval_dclde_birdnet_06['Truth'] == "SRKW"], 
+                                    score_column="SRKW", class_column="Predicted Class", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
         "TKW": tkw_cutoff,
@@ -767,22 +805,26 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "HW"], score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "TKW"], score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "SRKW"], score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
         "SRKW": srkw_cutoff_m
     }
     # Evaluate and plot DCLDE performance
-    metrics_DCLDE_06 = evaluate_model(eval_dclde_birdnet_06, custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 06", roc_title="DCLDE ROC Curve")
+    metrics_DCLDE_06 = evaluate_model(eval_dclde_birdnet_06, 
+                                      custom_thresholds=custom_thresholds_dclde, 
+                                pr_title="DCLDE Precision–Recall Curve 06", 
+                                roc_title="DCLDE ROC Curve 6")
     
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_06 = evaluate_model(eval_malahat_birdnet_06, custom_thresholds=custom_thresholds_malahat, 
-                                  pr_title="Malahat Precision–Recall Curve 06", roc_title="Malahat ROC Curve")
+    metrics_malahat_06 = evaluate_model(eval_malahat_birdnet_06, 
+                                        custom_thresholds=custom_thresholds_dclde, 
+                                  pr_title="Malahat Precision–Recall Curve 06",
+                                  roc_title="Malahat ROC Curve 6")
     
     
     
@@ -806,19 +848,19 @@ if __name__ == "__main__":
 
 
     try:
-        eval_dclde_birdnet_04 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz.csv')
+        eval_dclde_birdnet_04 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz_May2025.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
             eval_dclde_birdnet_04 = process_multiple_datasets(
                 model_config_04["model_path"], 
                 model_config_04["label_path"], 
                 dclde_folders, 
-                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz.csv')
-            eval_dclde_birdnet_04.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz.csv', index=False)
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz_May2025.csv')
+            eval_dclde_birdnet_04.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_04_8khz_May2025.csv', index=False)
             
             
     try:
-        eval_malahat_birdnet_04 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz.csv')
+        eval_malahat_birdnet_04 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz_May2025.csv')
 
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
@@ -826,14 +868,14 @@ if __name__ == "__main__":
             model_config_04["model_path"],
             model_config_04["label_path"], 
             malahat_folders, 
-            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz.csv', 
-                                                       classes=['SRKW','HW','TKW']) 
-        eval_malahat_birdnet_04.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz.csv', index=False)
+            
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz_May2025.csv') 
+        eval_malahat_birdnet_04.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_04_8khz_May2025.csv', index=False)
     
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "HW"], score_column="HW", title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "TKW"], score_column="TKW", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "SRKW"], score_column="SRKW", title_suffix="SRKW")
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_04[eval_dclde_birdnet_04['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
         "TKW": tkw_cutoff,
@@ -842,9 +884,9 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "HW"], score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "TKW"], score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "SRKW"], score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
@@ -853,12 +895,14 @@ if __name__ == "__main__":
 
     # Evaluate and plot DCLDE performance
     metrics_DCLDE_04 = evaluate_model(eval_dclde_birdnet_04, custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 04", roc_title="DCLDE ROC Curve")
+                                pr_title="DCLDE Precision–Recall Curve 04", 
+                                roc_title="DCLDE ROC Curve 04")
     
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_04 = evaluate_model(eval_malahat_birdnet_04, custom_thresholds=custom_thresholds_malahat, 
-                                  pr_title="Malahat Precision–Recall Curve 04", roc_title="Malahat ROC Curve")
+    metrics_malahat_04 = evaluate_model(eval_malahat_birdnet_04, custom_thresholds=custom_thresholds_dclde, 
+                                  pr_title="Malahat Precision–Recall Curve 04", 
+                                  roc_title="Malahat ROC Curve 04")
     
    
     #%% Birdnet 03 birdnet 
@@ -877,31 +921,38 @@ if __name__ == "__main__":
         "label_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Birdnet7Class_ONC_Larger\\CustomClassifier_Labels.txt"
     }
     
+    
 
     try:
-        eval_dclde_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03_8khz.csv')
+        eval_dclde_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03_8khz_May2025.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
-            eval_dclde_birdnet_03 = process_multiple_datasets(model_config_03["model_path"], model_config_03["label_path"], 
+            eval_dclde_birdnet_03 = process_multiple_datasets(model_config_03["model_path"], 
+                                                              model_config_03["label_path"], 
                                                    dclde_folders, 
-                                                   output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03_8khz.csv')
-            eval_dclde_birdnet_03.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03_8khz.csv', index=False)
+                                                   output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03.csv')
+            eval_dclde_birdnet_03.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_03_8khz_May2025.csv', index=False)
     try:
-        eval_malahat_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz.csv')
+        eval_malahat_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz_May2025.csv')
         classes=['SRKW','OKW','HW','TKW']
-        #eval_malahat_birdnet_03['Class'] = eval_malahat_birdnet_03[classes].idxmax(axis=1)
+        
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
-        eval_malahat_birdnet_03 = process_multiple_datasets(model_config_03["model_path"], model_config_03["label_path"], 
+        eval_malahat_birdnet_03 = process_multiple_datasets(model_config_03["model_path"], 
+                                                            model_config_03["label_path"], 
                                                        malahat_folders, 
-                                                       output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz.csv', 
-                                                       classes=['SRKW','HW','TKW'])
-        eval_malahat_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz.csv')
+                                                       output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz_May2025.csv', 
+                                                       classes=['SRKW','HW','TKW']
+                                                       )
+        eval_malahat_birdnet_03 = pd.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_03_8khz_May2025.csv')
     
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "HW"], score_column="HW", title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "TKW"], score_column="TKW", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "SRKW"], score_column="SRKW", title_suffix="SRKW")
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "HW"],
+                                    score_column="HW", title_suffix="Humpback", class_column="Predicted Class",)
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "TKW"], 
+                                    score_column="TKW", title_suffix="TKW", class_column="Predicted Class")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_03[eval_dclde_birdnet_03['Truth'] == "SRKW"], 
+                                    score_column="SRKW", title_suffix="SRKW", class_column="Predicted Class")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
         "TKW": tkw_cutoff,
@@ -910,9 +961,9 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "HW"], score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "TKW"], score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "SRKW"], score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
@@ -920,13 +971,17 @@ if __name__ == "__main__":
     }
 
     # Evaluate and plot DCLDE performance
-    metrics_DCLDE_03 = evaluate_model(eval_dclde_birdnet_03, custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 03", roc_title="DCLDE ROC Curve")
+    metrics_DCLDE_03 = evaluate_model(eval_dclde_birdnet_03, 
+                                      custom_thresholds=custom_thresholds_dclde, 
+                                pr_title="DCLDE Precision–Recall Curve 03", 
+                                roc_title="DCLDE ROC Curve 03")
     
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_03 = evaluate_model(eval_malahat_birdnet_03, custom_thresholds=custom_thresholds_malahat, 
-                                  pr_title="Malahat Precision–Recall Curve 03", roc_title="Malahat ROC Curve")
+    metrics_malahat_03 = evaluate_model(eval_malahat_birdnet_03, 
+                                        custom_thresholds=custom_thresholds_dclde, 
+                                  pr_title="Malahat Precision–Recall Curve 03", 
+                                  roc_title="Malahat ROC Curve 03")
     
 
     #%% Birdnet 05 birdnet 
@@ -946,28 +1001,28 @@ if __name__ == "__main__":
     
 
     try:
-        eval_dclde_birdnet_05 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz.csv')
+        eval_dclde_birdnet_05 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz_May2025.csv')
     except:
         # Process all DCLDE datasets into one DataFrame.
         eval_dclde_birdnet_05 = process_multiple_datasets(model_config_05["model_path"], model_config_05["label_path"], 
-                                                   dclde_folders, output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz.csv')
-        eval_dclde_birdnet_05.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz.csv', index=False)    
+                                                   dclde_folders, output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz_May2025.csv')
+        eval_dclde_birdnet_05.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_05_8khz_May2025.csv', index=False)    
     try:
-        eval_malahat_birdnet_05 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz.csv')
+        eval_malahat_birdnet_05 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz_May2025.csv')
         classes=['SRKW','OKW','HW','TKW']
         eval_malahat_birdnet_05['Class'] = eval_malahat_birdnet_05[classes].idxmax(axis=1)
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_05 = process_multiple_datasets(model_config_05["model_path"], model_config_05["label_path"], 
                                                        malahat_folders, 
-                                                       output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz.csv', 
+                                                       output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz_May2025.csv', 
                                                        classes=['SRKW','HW','TKW'])
-        eval_malahat_birdnet_05.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz.csv', index=False)  
+        eval_malahat_birdnet_05.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_05_8kHz_May2025.csv', index=False)  
     
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "HW"], score_column="HW", title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "TKW"], score_column="TKW", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "SRKW"], score_column="SRKW", title_suffix="SRKW")
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_05[eval_dclde_birdnet_05['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
         "TKW": tkw_cutoff,
@@ -976,9 +1031,9 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "HW"], score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "TKW"], score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "SRKW"], score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
@@ -986,13 +1041,17 @@ if __name__ == "__main__":
     }
 
     # Evaluate and plot DCLDE performance
-    metrics_DCLDE_05 = evaluate_model(eval_dclde_birdnet_05, custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 05", roc_title="DCLDE ROC Curve")
+    metrics_DCLDE_05 = evaluate_model(eval_dclde_birdnet_05, 
+                                      custom_thresholds=custom_thresholds_dclde, 
+                                pr_title="DCLDE Precision–Recall Curve 05",
+                                roc_title="DCLDE ROC Curve 05")
     
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_05 = evaluate_model(eval_malahat_birdnet_05, custom_thresholds=custom_thresholds_malahat, 
-                                  pr_title="Malahat Precision–Recall Curve 05", roc_title="Malahat ROC Curve")
+    metrics_malahat_05 = evaluate_model(eval_malahat_birdnet_05, 
+                                        custom_thresholds=custom_thresholds_dclde, 
+                                  pr_title="Malahat Precision–Recall Curve 05", 
+                                  roc_title="Malahat ROC Curve 05")
     
 
     #%% Birdnet 07 birdnet 
@@ -1031,15 +1090,15 @@ if __name__ == "__main__":
         "OKW":        r"C:\TempData\threeSecClips_non_training_TKWCalls_fixed\OKW"
     }   
     try:
-        eval_dclde_birdnet_07 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_07_8kHz.csv')
+        eval_dclde_birdnet_07 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_07_8kHz_May2025.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
             eval_dclde_birdnet_07 = process_multiple_datasets(model_config_07["model_path"], model_config_07["label_path"], 
                                                    dclde_folders, output_csv=output_csv)
-            eval_dclde_birdnet_07.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_07_8kHz.csv', index=False)
+            eval_dclde_birdnet_07.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Eval_dclde_birdnet_07_8kHz_May2025.csv', index=False)
             
     try:
-        eval_malahat_birdnet_07 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_07_8kHz.csv')
+        eval_malahat_birdnet_07 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_07_8kHz_May2025.csv')
         classes=['SRKW','OKW','HW','TKW']
         eval_malahat_birdnet_07['Class'] = eval_malahat_birdnet_07[classes].idxmax(axis=1)
     except:            
@@ -1047,12 +1106,12 @@ if __name__ == "__main__":
         eval_malahat_birdnet_07 = process_multiple_datasets(model_config_07["model_path"], model_config_07["label_path"], 
                                                        malahat_folders, output_csv=output_csv, 
                                                        classes=['SRKW','HW','TKW'])
-        eval_malahat_birdnet_07.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_07_8kHz.csv', index=False)
+        eval_malahat_birdnet_07.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\eval_malahat_birdnet_07_8kHz_May2025.csv', index=False)
     
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "HW"], score_column="HW", title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "TKW"], score_column="TKW", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "SRKW"], score_column="SRKW", title_suffix="SRKW")
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_07[eval_dclde_birdnet_07['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
         "TKW": tkw_cutoff,
@@ -1061,9 +1120,9 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "HW"], score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "TKW"], score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "SRKW"], score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
@@ -1073,17 +1132,21 @@ if __name__ == "__main__":
 
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_07 = evaluate_model(eval_malahat_birdnet_07, custom_thresholds=custom_thresholds_malahat, 
-                                  pr_title="Malahat Precision–Recall Curve 07", roc_title="Malahat ROC Curve")
+    metrics_malahat_07 = evaluate_model(eval_malahat_birdnet_07, custom_thresholds=custom_thresholds_dclde, 
+                                  pr_title="Malahat Precision–Recall Curve 07", 
+                                  roc_title="Malahat ROC Curve 07")
 
     # Evaluate and plot DCLDE performance
     metrics_DCLDE_07 = evaluate_model(eval_dclde_birdnet_07, custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 07", roc_title="DCLDE ROC Curve")
+                                pr_title="DCLDE Precision–Recall Curve 07",
+                                roc_title="DCLDE ROC Curve 07")
     
 
 #%% Combine metrics for sanity
 
-modelNames = address = ['birdNET_03', 'birdNET_04', 'birdNET_05', 'birdNET_06', 'birdNET_07']
+modelNames = address = ['birdNET_03', 'birdNET_04',
+                        'birdNET_05', 'birdNET_06',
+                        'birdNET_07']
 
 
 AUCDCLDE = pd.DataFrame([metrics_DCLDE_03['AUC'],
@@ -1118,147 +1181,147 @@ MAP_Malahat= pd.DataFrame([metrics_malahat_03['MAP'],
 MAP_Malahat['Model'] =modelNames
 
 
-#%% Run selected models on data
+# #%% Run selected models on data
 
 
-model_config_04 = {
-        "model_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG.tflite",
-        "label_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG_Labels.txt"
-    }
+# model_config_04 = {
+#         "model_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG.tflite",
+#         "label_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG_Labels.txt"
+#     }
 
-Adrift_040_loc = Adrift_040_loc
-
-
-
-processor = Eco.BirdNetPredictor(model_path= model_config_04['model_path'],
-                                 label_path = model_config_04['label_path'], 
-                                 audio_folder =Adrift_040_loc,
-                                 confidence_thresh = .8)
-
-output_csv = 'BirdNet07_Adrift_042.csv'
-results_df = processor.batch_process_audio_folder(output_csv)
-
-
-results_dfOrig = results_df
-processor.export_to_raven(results_df, raven_file="raven_output_ADRIFT_040.txt")
+# Adrift_040_loc = Adrift_040_loc
 
 
 
+# processor = Eco.BirdNetPredictor(model_path= model_config_04['model_path'],
+#                                  label_path = model_config_04['label_path'], 
+#                                  audio_folder =Adrift_040_loc,
+#                                  confidence_thresh = .8)
+
+# output_csv = 'BirdNet07_Adrift_042.csv'
+# results_df = processor.batch_process_audio_folder(output_csv)
 
 
-Adrift_060_loc = 'C:\\TempData\\Adrift\\Adrift_060\\'
-Adrift_060_loc = 'C:\\TempData\\Adrift\\TKW_files'
-
-
-processor = Eco.BirdNetPredictor(model_path= model_config_04['model_path'],
-                                 label_path = model_config_04['label_path'], 
-                                 audio_folder =Adrift_060_loc,
-                                 confidence_thresh = .8)
-
-output_csv = 'BirdNet07_Adrift_060.csv'
-results_df = processor.batch_process_audio_folder(output_csv)
-
-
-results_dfOrig = results_df
-processor.export_to_raven(results_df, raven_file="raven_output_ADRIFT_060_singleFile.txt")
+# results_dfOrig = results_df
+# processor.export_to_raven(results_df, raven_file="raven_output_ADRIFT_040.txt")
 
 
 
 
 
-import os
-import librosa
-
-# Define the path to your folder containing audio files
-folder_path = Adrift_060_loc
-
-# List all files in the folder
-audio_files = [f for f in os.listdir(folder_path) if f.endswith('.flac')]
-
-# Initialize a list to store file durations
-file_durations = []
-
-for file in audio_files:
-    # Get the duration directly from the file metadata
-    duration = librosa.get_duration(filename=os.path.join(folder_path, file))
-    file_durations.append(duration)
-    print(file)
-
-# Create a DataFrame
-df_durations = pd.DataFrame({
-    'File': audio_files,
-    'Duration': file_durations
-})
+# Adrift_060_loc = 'C:\\TempData\\Adrift\\Adrift_060\\'
+# Adrift_060_loc = 'C:\\TempData\\Adrift\\TKW_files'
 
 
-print(df_durations)
+# processor = Eco.BirdNetPredictor(model_path= model_config_04['model_path'],
+#                                  label_path = model_config_04['label_path'], 
+#                                  audio_folder =Adrift_060_loc,
+#                                  confidence_thresh = .8)
+
+# output_csv = 'BirdNet07_Adrift_060.csv'
+# results_df = processor.batch_process_audio_folder(output_csv)
 
 
-# Assume results_df is already loaded
-
-# Sort files in the order they are processed
-df_durations.sort_values('File', inplace=True)
-
-# Calculate cumulative start times for each file
-df_durations['Cumulative Start'] = df_durations['Duration'].cumsum() - df_durations['Duration']
-
-# Create a dictionary to map files to their cumulative start times
-cumulative_starts = df_durations.set_index('File')['Cumulative Start'].to_dict()
-
-# Adjust the start and end times in the results_df
-results_df['Adjusted Begin Time (S)'] = results_df.apply(lambda row: row['Begin Time (S)'] + cumulative_starts[row['File']], axis=1)
-results_df['Adjusted End Time (S)'] = results_df.apply(lambda row: row['End Time (S)'] + cumulative_starts[row['File']], axis=1)
-
-print(results_df[['File', 'Adjusted Begin Time (S)', 'Adjusted End Time (S)']])
-
-
-results_df['Selection'] = range(1, results_df.shape[0] + 1)
-results_df['Channel'] = 2
-results_df['View'] = 'Spectrogram 1'
-
-raven_file="raven_output_ADRIFT_060.txt"
-
-results_df['Begin Time (S)']= results_df[ 'Adjusted Begin Time (S)']
-results_df['End Time (S)']= results_df[ 'Adjusted End Time (S)']
-
-with open(raven_file, 'w') as f:
-    # Write header
-    f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tCommon name\tScore\n")
-    for _, row in results_df.iterrows():
-        line = f"{row['Selection']}\t{row['View']}\t{row['Channel']}\t{row['Begin Time (S)']}\t{row['End Time (S)']}\t{row['Common name']}\t{row['Score']}\n"
-        f.write(line)
-
-#%% Try using faster audio processor for birdnet
+# results_dfOrig = results_df
+# processor.export_to_raven(results_df, raven_file="raven_output_ADRIFT_060_singleFile.txt")
 
 
 
-birdNet04_path = 'C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG.tflite'
-label_path ="C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG_Labels.txt"
 
-confidence_thresh= {'HW': 0.9,
- 'TKW': 0.9,
- 'SRKW': 0.9,
- 'OKW': 0.8}
 
-fasterProcessor_Adrift60 = Eco.BirdnetAudioProcessor5(
-    folder_path='C:/TempData\\Adrift\\audio\\', 
-    segment_duration=3.0, 
-    overlap=0, 
-    model_path=birdNet04_path,
-             label_path = label_path, 
-             confidence_thresh=confidence_thresh,
-             selection_table_name="detections.txt",
-             table_type="Birdnet04_Adrift_60",
-             outputAllScores = False, 
-             retain_detections = True)
+# import os
+# import librosa
 
-# Example usage
-processor = AudioProcessor5(
-    folder_path='C:/TempData\\Adrift\\audio\\',
-    model_path="path/to/birdnet_model.tflite",
-    label_path="path/to/labels.txt",
-    detection_thresholds={0: 0.8, 1: 0.7, 2: 0.6},  # Custom detection thresholds per class if needed
-    class_names=["Abiotic", "BKW", "HW", "NRKW", "Offshore", "SRKW", "Und Bio"]
-)
+# # Define the path to your folder containing audio files
+# folder_path = Adrift_060_loc
+
+# # List all files in the folder
+# audio_files = [f for f in os.listdir(folder_path) if f.endswith('.flac')]
+
+# # Initialize a list to store file durations
+# file_durations = []
+
+# for file in audio_files:
+#     # Get the duration directly from the file metadata
+#     duration = librosa.get_duration(filename=os.path.join(folder_path, file))
+#     file_durations.append(duration)
+#     print(file)
+
+# # Create a DataFrame
+# df_durations = pd.DataFrame({
+#     'File': audio_files,
+#     'Duration': file_durations
+# })
+
+
+# print(df_durations)
+
+
+# # Assume results_df is already loaded
+
+# # Sort files in the order they are processed
+# df_durations.sort_values('File', inplace=True)
+
+# # Calculate cumulative start times for each file
+# df_durations['Cumulative Start'] = df_durations['Duration'].cumsum() - df_durations['Duration']
+
+# # Create a dictionary to map files to their cumulative start times
+# cumulative_starts = df_durations.set_index('File')['Cumulative Start'].to_dict()
+
+# # Adjust the start and end times in the results_df
+# results_df['Adjusted Begin Time (S)'] = results_df.apply(lambda row: row['Begin Time (S)'] + cumulative_starts[row['File']], axis=1)
+# results_df['Adjusted End Time (S)'] = results_df.apply(lambda row: row['End Time (S)'] + cumulative_starts[row['File']], axis=1)
+
+# print(results_df[['File', 'Adjusted Begin Time (S)', 'Adjusted End Time (S)']])
+
+
+# results_df['Selection'] = range(1, results_df.shape[0] + 1)
+# results_df['Channel'] = 2
+# results_df['View'] = 'Spectrogram 1'
+
+# raven_file="raven_output_ADRIFT_060.txt"
+
+# results_df['Begin Time (S)']= results_df[ 'Adjusted Begin Time (S)']
+# results_df['End Time (S)']= results_df[ 'Adjusted End Time (S)']
+
+# with open(raven_file, 'w') as f:
+#     # Write header
+#     f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tCommon name\tScore\n")
+#     for _, row in results_df.iterrows():
+#         line = f"{row['Selection']}\t{row['View']}\t{row['Channel']}\t{row['Begin Time (S)']}\t{row['End Time (S)']}\t{row['Common name']}\t{row['Score']}\n"
+#         f.write(line)
+
+# #%% Try using faster audio processor for birdnet
+
+
+
+# birdNet04_path = 'C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG.tflite'
+# label_path ="C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Backgrd_mn_srkw_tkw_okw_6k\\CustomClassifier_rkwMN_BG_Labels.txt"
+
+# confidence_thresh= {'HW': 0.9,
+#  'TKW': 0.9,
+#  'SRKW': 0.9,
+#  'OKW': 0.8}
+
+# fasterProcessor_Adrift60 = Eco.BirdnetAudioProcessor5(
+#     folder_path='C:/TempData\\Adrift\\audio\\', 
+#     segment_duration=3.0, 
+#     overlap=0, 
+#     model_path=birdNet04_path,
+#              label_path = label_path, 
+#              confidence_thresh=confidence_thresh,
+#              selection_table_name="detections.txt",
+#              table_type="Birdnet04_Adrift_60",
+#              outputAllScores = False, 
+#              retain_detections = True)
+
+# # Example usage
+# processor = AudioProcessor5(
+#     folder_path='C:/TempData\\Adrift\\audio\\',
+#     model_path="path/to/birdnet_model.tflite",
+#     label_path="path/to/labels.txt",
+#     detection_thresholds={0: 0.8, 1: 0.7, 2: 0.6},  # Custom detection thresholds per class if needed
+#     class_names=["Abiotic", "BKW", "HW", "NRKW", "Offshore", "SRKW", "Und Bio"]
+# )
 
 

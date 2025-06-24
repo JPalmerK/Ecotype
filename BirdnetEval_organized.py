@@ -727,7 +727,7 @@ def evaluate_model(eval_df,
     
     
     return metrics
-#%%
+
 # --- Main Evaluation Block ---
 if __name__ == "__main__":
     
@@ -766,16 +766,16 @@ if __name__ == "__main__":
     
 
     try:
-        eval_dclde_birdnet_01 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval_newtest.csv')
+        eval_dclde_birdnet_01 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
             eval_dclde_birdnet_01 = process_multiple_datasets(
                 model_config_01["model_path"],
                 model_config_01["label_path"], 
                 dclde_folders, 
-                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval_newtest.csv')
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv')
             
-            eval_dclde_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval_newtest.csv', index=False)
+            eval_dclde_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv', index=False)
     
     
     
