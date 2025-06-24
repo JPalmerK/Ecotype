@@ -1511,6 +1511,8 @@ Malahat = allAnno[allAnno$HoldOut =='JASCO_Malahat',]
 # The malahat data has a bunch of KW annotations that are not labeled
 # to ecotype. These should be given an UNDKW label
 Malahat$Labels[is.na(Malahat$Ecotype) & Malahat$KW==1] = 'KW_und'
+DCLDE_train$Labels[is.na(DCLDE_train$Ecotype) & DCLDE_train$KW==1] = 'KW_und'
+DCLDE_HoldOut$Labels[is.na(DCLDE_HoldOut$Ecotype) & DCLDE_HoldOut$KW==1] = 'KW_und'
 
 
 write.csv(DCLDE_train, 'DCLDE_train_parent.csv')
