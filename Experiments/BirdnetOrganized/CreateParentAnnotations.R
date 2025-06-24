@@ -18,7 +18,7 @@ source('C:/Users/kaity/Documents/GitHub/DCLDE2026/TestFx.R')
 
 ############################################################################
 # Final output column names
-
+set.seed(5)
 colOut = c('Soundfile','Dep','LowFreqHz','HighFreqHz','FileEndSec', 'UTC',
            'FileBeginSec','ClassSpecies','KW','KW_certain','Ecotype', 'Provider',
            'AnnotationLevel', 'FilePath', 'FileOk', 'CallType')
@@ -160,7 +160,7 @@ ONC_anno$FileOk  = file.exists(ONC_anno$FilePath)
 ONC_anno$FileUTC =ONC_anno$UTC- seconds(as.numeric(ONC_anno$FileBeginSec))
 
 
-ONC_anno$CallType = ''
+ONC_anno$CallType = ONC_anno$Call.Type
 ONC_anno= ONC_anno[,colOut]
 
 rm(list= c('missingData', 'badidx', 'dayFolderPath'))
@@ -196,9 +196,6 @@ DFO_CRP$UTC = as.POSIXct(DFO_CRP$utc, format="%Y-%m-%d %H:%M:%OS", tz = 'UTC')+
 table(DFO_CRP$sound_id_species)
 
 DFO_CRP$ClassSpecies = DFO_CRP$sound_id_species
-
-
-
 
 
 # Clean up the abiotic counds
@@ -1511,9 +1508,14 @@ DCLDE_train = allAnno[allAnno$HoldOut == 'DCLDE_Train',]
 DCLDE_HoldOut = allAnno[allAnno$HoldOut == 'DCLDE_HoldOut',]
 Malahat = allAnno[allAnno$HoldOut =='JASCO_Malahat',]
 
+# The malahat data has a bunch of KW annotations that are not labeled
+# to ecotype. These should be given an UNDKW label
+Malahat$Labels[is.na(Malahat$Ecotype) & Malahat$KW==1] = 'KW_und'
+
+
 write.csv(DCLDE_train, 'DCLDE_train_parent.csv')
 write.csv(DCLDE_HoldOut, 'DCLDE_Holdout_parent.csv')
-write.csv(Malahat, 'Malahat_Holdout_parent.csv')
+write.csv(Malahat, 'Malahat_Holdout_parent_redo.csv')
 
 # Check that files aren't split
 any(unique(DCLDE_train$Soundfile) %in% unique(DCLDE_HoldOut$Soundfile))

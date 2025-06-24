@@ -29,6 +29,58 @@ from tensorflow.keras.callbacks import TensorBoard
 #import seaborn as sns
 from pathlib import Path
 
+def bandpass(sig, rate, fmin, fmax, order=5):
+    """
+    Apply a bandpass filter to the input signal. Taken from birdnet
+    https://github.com/birdnet-team/BirdNET-Analyzer/blob/main/birdnet_analyzer/audio.py
+
+    Args:
+        sig (numpy.ndarray): The input signal to be filtered.
+        rate (int): The sampling rate of the input signal.
+        fmin (float): The minimum frequency for the bandpass filter.
+        fmax (float): The maximum frequency for the bandpass filter.
+        order (int, optional): The order of the filter. Default is 5.
+
+    Returns:
+        numpy.ndarray: The filtered signal as a float32 array.
+    """
+    # # Check if we have to bandpass at all
+    # if (fmin == cfg.SIG_FMIN and fmax == cfg.SIG_FMAX) or fmin > fmax:
+    #     return sig
+
+    # from scipy.signal import butter, lfilter
+
+    # nyquist = 0.5 * rate
+
+    # # Highpass?
+    # if fmin > cfg.SIG_FMIN and fmax == cfg.SIG_FMAX:
+    #     low = fmin / nyquist
+    #     b, a = butter(order, low, btype="high")
+    #     sig = lfilter(b, a, sig)
+
+    # # Lowpass?
+    # elif fmin == cfg.SIG_FMIN and fmax < cfg.SIG_FMAX:
+    #     high = fmax / nyquist
+    #     b, a = butter(order, high, btype="low")
+    #     sig = lfilter(b, a, sig)
+
+    # # Bandpass?
+    # elif fmin > cfg.SIG_FMIN and fmax < cfg.SIG_FMAX:
+    #     low = fmin / nyquist
+    #     high = fmax / nyquist
+    #     b, a = butter(order, [low, high], btype="band")
+    #     sig = lfilter(b, a, sig)
+    
+    nyquist = rate/2 
+    
+    low = fmin / nyquist
+    high = fmax / nyquist
+    b, a = butter(order, [low, high], btype="band")
+    sig = lfilter(b, a, sig)
+
+    return sig.astype("float32")
+
+
 
 def create_spectrogram(audio, return_snr=False,**kwargs):
     """
@@ -1597,8 +1649,9 @@ from tensorflow import lite as tflite  # Using TensorFlow's built-in lite interp
 
 class BirdNetPredictor:
     def __init__(self, model_path, label_path, audio_folder, 
-                 sample_rate=48000, audio_duration=3.0, 
-                 confidence_thresh=0.5):
+                 sample_rate=48000, 
+                 audio_duration=3.0, 
+                 confidence_thresh=0.5,):
         """
         Processor class for running TFLite (e.g. BirdNET) models on audio files
         in a folder.
@@ -1646,9 +1699,18 @@ class BirdNetPredictor:
         ################################################################
         #XXXX Temp add preprocessing XXX
         ##################################################################
-        high = 16000 / (target_sr/2)
+        # high = 15000 / (target_sr/2)
+        # b, a = butter(5, high, btype="low")
+        # audio = lfilter(b, a, audio)
+        
+        high = 15000 / (target_sr/2)
         b, a = butter(5, high, btype="low")
         audio = lfilter(b, a, audio)
+        
+       
+        
+        # # Taken from birdnet repository
+        # audio = bandpass(audio, 16000, 1, 15000, order=5)
 
         
         # Calculate required number of samples for the given duration
@@ -1696,60 +1758,68 @@ class BirdNetPredictor:
         results = []
         raw_scores = []
     
+        # 1) Initialize rows list BEFORE looping over segments
+        rows = []
+        
         for i in range(num_segments):
             start_sample = i * segment_length
             end_sample = min((i + 1) * segment_length, len(y))
             segment = y[start_sample:end_sample]
-    
+        
             # Preprocess segment
-            processed_segment = self.preprocess_audio(segment, sr=sr, 
-                                                      target_sr=self.sample_rate,
-                                                      duration=self.audio_duration)
-    
+            processed_segment = self.preprocess_audio(
+                segment,
+                sr=sr,
+                target_sr=self.sample_rate,
+                duration=self.audio_duration
+            )
+        
             # Predict (logit output)
             predictions = self.predict_segment(processed_segment)
-    
+        
             # Convert logits to confidence scores using sigmoid
             confidence_scores = scipy.special.expit(predictions)
-    
-            # Build filtered results: one row per class above threshold for this segment
-            for class_idx, (logit, confidence) in enumerate(zip(predictions, confidence_scores)):
-                label = self.labels[class_idx] if class_idx < len(self.labels) else f"Unknown Class {class_idx}"
-                if confidence >= self.confidence_thresh:
-                    results.append({
-                        "Begin Time (S)": round(start_sample / sr, 2),
-                        "End Time (S)": round(end_sample / sr, 2),
-                        "Class": label,
-                        "Common name": label,  # Replace with common name if needed
-                        "Score": round(confidence, 4),
-                        "File": os.path.basename(audio_path),
-                        "FilePath": audio_path
-                    })
-    
-            # Build raw scores row: one row per segment with a column for each class
-            raw_scores_row = {
+        
+            # 2) Skip this segment entirely if no class exceeds threshold
+            if max(confidence_scores) < self.confidence_thresh:
+                continue
+        
+            # 3) Build exactly one row for this segment
+            row = {
                 "Begin Time (S)": round(start_sample / sr, 2),
-                "End Time (S)": round(end_sample / sr, 2),
-                "File": os.path.basename(audio_path),
-                "FilePath": audio_path,
-                "Truth": Path(audio_path).parts[-2],
+                "End Time (S)":   round(end_sample / sr,   2),
+                "File":            os.path.basename(audio_path),
+                "FilePath":        audio_path,
+                "Truth":           Path(audio_path).parts[-2],
             }
-            for class_idx, (logit, confidence) in enumerate(zip(predictions, confidence_scores)):
-                label = self.labels[class_idx] if class_idx < len(self.labels) else f"Unknown Class {class_idx}"
-                raw_scores_row[label] = round(confidence, 4)
-            raw_scores.append(raw_scores_row)
+        
+            # 4) Add one "<label>_score" column per class
+            for class_idx, label in enumerate(self.labels):
+                confidence_value = confidence_scores[class_idx]
+                row[f"{label}"] = round(confidence_value, 4)
+        
+            # 5) (Optional) If you still want a “winner” column, you can do:
+            top_idx = int(np.argmax(confidence_scores))
+            row["Predicted Class"] = self.labels[top_idx]
+            row["Top Score"]      = round(confidence_scores[top_idx], 4)
+        
+            # 6) Append this single-row dict to rows
+            rows.append(row)
+        
+            # (Optional) debug print per segment
+            #print(f"Segment {i + 1}: kept one row with top label '{self.labels[top_idx]}'")
+        
+        # 7) After the loop, construct the DataFrame:
+        results_df = pd.DataFrame(rows)
+
+        return results_df
     
-            print(f"Segment {i + 1}: Processed {len(self.labels)} classes")
+   
     
-        results_df = pd.DataFrame(results)
-        raw_scores_df = pd.DataFrame(raw_scores)
-    
-        if return_raw_scores:
-            return results_df, raw_scores_df
-        else:
-            return results_df
-    
-    def batch_process_audio_folder(self, output_csv="predictions.csv", return_raw_scores=False):
+    def batch_process_audio_folder(self, 
+                                   output_csv="predictions.csv", 
+                                   return_raw_scores=False,
+                                   thresh=0):
         """
         Recursively process all audio files in a folder and save results to CSV.
         
@@ -1773,25 +1843,34 @@ class BirdNetPredictor:
                 if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg')):
                     audio_path = os.path.join(root, filename)
                     print(f"Processing {audio_path}...")
+                    
+                    results_df = self.predict_long_audio(audio_path, return_raw_scores=True)
+                    all_results.append(results_df)
     
-                    if return_raw_scores:
-                        results_df, raw_scores_df = self.predict_long_audio(audio_path, return_raw_scores=True)
-                        all_results.append(results_df)
-                        all_raw_scores.append(raw_scores_df)
-                    else:
-                        results_df = self.predict_long_audio(audio_path, return_raw_scores=False)
-                        all_results.append(results_df)
+                    # if return_raw_scores:
+                    #     results_df, raw_scores_df = self.predict_long_audio(audio_path, return_raw_scores=True)
+                    #     all_results.append(results_df)
+                    #     all_raw_scores.append(raw_scores_df)
+                    # else:
+                    #     results_df = self.predict_long_audio(audio_path, return_raw_scores=False)
+                    #     all_results.append(results_df)
     
-        final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+        
         #final_df.to_csv(output_csv, index=False)
         print(f"Batch processing complete! Results saved to {output_csv}")
+        
+        
+        final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+        return final_df
+        
+        
     
-        if return_raw_scores and all_raw_scores:
-            raw_scores_df = pd.concat(all_raw_scores, ignore_index=True)
-            #raw_scores_df.to_csv(output_csv, index=False)
-            return final_df, raw_scores_df
-        else:
-            return final_df
+        # if return_raw_scores and all_raw_scores:
+        #     raw_scores_df = pd.concat(all_raw_scores, ignore_index=True)
+        #     #raw_scores_df.to_csv(output_csv, index=False)
+        #     return final_df, raw_scores_df
+        # else:
+        #     return final_df
     
     def export_to_raven(self, df, raven_file="raven_output.txt"):
         """Export prediction results to a Raven selection table format."""
@@ -2055,6 +2134,229 @@ class AudioProcessor5:
     
             # Update the global filestreamStart after processing the current file
             filestreamStart += chunk_start_time  # Increment global filestream start time
+
+
+import os
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import librosa
+import scipy.special
+from scipy.signal import butter, lfilter
+import tensorflow.lite as tflite
+
+class BirdNetPredictorNew:
+    def __init__(self, model_path, label_path, audio_folder, 
+                 sample_rate=48000, 
+                 audio_duration=3.0, 
+                 confidence_thresh=0.5):
+        self.model_path = model_path
+        self.label_path = label_path
+        self.audio_folder = audio_folder
+        self.sample_rate = sample_rate
+        self.audio_duration = audio_duration
+        self.confidence_thresh = confidence_thresh
+
+        # Load TFLite model
+        self.interpreter = tflite.Interpreter(model_path=model_path)
+        self.interpreter.allocate_tensors()
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+
+        # Use input shape to infer duration
+        input_shape = self.input_details[0]['shape']
+        self.audio_duration = input_shape[1] / self.sample_rate
+        print(f"Model expects {self.audio_duration} seconds of audio at {self.sample_rate} Hz")
+
+        self.labels = self.load_labels(label_path)
+
+    def load_labels(self, label_path):
+        with open(label_path, "r") as f:
+            return [line.strip() for line in f.readlines()]
+
+    def preprocess_audio(self, audio, sr, target_sr=48000, duration=3.0):
+        if sr != target_sr:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+
+        high = 16000 / (target_sr / 2)
+        b, a = butter(5, high, btype="low")
+        audio = lfilter(b, a, audio)
+
+        required_length = int(target_sr * duration)
+        if len(audio) < required_length:
+            audio = np.pad(audio, (0, required_length - len(audio)), mode='constant')
+        else:
+            audio = audio[:required_length]
+
+        return np.expand_dims(audio.astype(np.float32), axis=0)
+
+    def predict_batch(self, audio_batch):
+        """
+        Run inference on a batch of preprocessed segments. Expects shape (batch_size, samples).
+        """
+        self.interpreter.resize_tensor_input(self.input_details[0]['index'], audio_batch.shape)
+        self.interpreter.allocate_tensors()
+        self.interpreter.set_tensor(self.input_details[0]['index'], audio_batch)
+        self.interpreter.invoke()
+        predictions = self.interpreter.get_tensor(self.output_details[0]['index'])
+        return predictions
+
+    def predict_long_audio(self, audio_path, return_raw_scores=False):
+        y, sr = librosa.load(audio_path, sr=None)
+        segment_length = int(sr * self.audio_duration)
+        num_segments = int(np.ceil(len(y) / segment_length))
+
+        processed_segments = []
+        start_ends = []
+
+        for i in range(num_segments):
+            start_sample = i * segment_length
+            end_sample = min((i + 1) * segment_length, len(y))
+            segment = y[start_sample:end_sample]
+            processed = self.preprocess_audio(segment, sr=sr, target_sr=self.sample_rate, duration=self.audio_duration)
+            processed_segments.append(processed)
+            start_ends.append((start_sample, end_sample))
+
+        if not processed_segments:
+            return pd.DataFrame()
+
+        audio_batch = np.vstack(processed_segments)
+        predictions = self.predict_batch(audio_batch)
+
+        rows = []
+        for i, prediction in enumerate(predictions):
+            confidence_scores = scipy.special.expit(prediction)
+
+            if max(confidence_scores) < self.confidence_thresh:
+                continue
+
+            start_sample, end_sample = start_ends[i]
+
+            row = {
+                "Begin Time (S)": round(start_sample / sr, 2),
+                "End Time (S)": round(end_sample / sr, 2),
+                "File": os.path.basename(audio_path),
+                "FilePath": audio_path,
+                "Truth": Path(audio_path).parts[-2],
+            }
+
+            for class_idx, label in enumerate(self.labels):
+                row[f"{label}"] = round(confidence_scores[class_idx], 4)
+
+            top_idx = int(np.argmax(confidence_scores))
+            row["Predicted Class"] = self.labels[top_idx]
+            row["Top Score"] = round(confidence_scores[top_idx], 4)
+
+            rows.append(row)
+
+        results_df = pd.DataFrame(rows)
+        return results_df
+    def batch_process_audio_folder(self, 
+                               output_csv="predictions.csv", 
+                               return_raw_scores=False,
+                               batch_size=64):
+        """
+        Process all audio files in the folder in batches of N files.
+        """
+        all_results = []
+        batch_audio = []
+        batch_paths = []
+    
+        for root, _, files in os.walk(self.audio_folder):
+            audio_files = [
+                os.path.join(root, f)
+                for f in files
+                if f.lower().endswith(('.wav', '.mp3', '.flac', '.ogg'))
+            ]
+            print(f"Found {len(audio_files)} audio files...")
+            nbatches = np.ceil(len(audio_files)/batch_size)
+            for j, audio_path in enumerate(audio_files):
+                y, sr = librosa.load(audio_path, sr=None)
+                processed = self.preprocess_audio(
+                    y, sr=sr, target_sr=self.sample_rate, duration=self.audio_duration
+                )
+                batch_audio.append(processed)
+                batch_paths.append(audio_path)
+    
+                # When we hit the batch size, run prediction
+                if len(batch_audio) == batch_size:
+                    batch_array = np.vstack(batch_audio)
+                    predictions = self.predict_batch(batch_array)
+    
+                    for i, prediction in enumerate(predictions):
+                        confidence_scores = scipy.special.expit(prediction)
+                        if max(confidence_scores) < self.confidence_thresh:
+                            continue
+    
+                        row = {
+                            "Begin Time (S)": 0,
+                            "End Time (S)": round(self.audio_duration, 2),
+                            "File": os.path.basename(batch_paths[i]),
+                            "FilePath": batch_paths[i],
+                            "Truth": Path(batch_paths[i]).parts[-2],
+                        }
+    
+                        for class_idx, label in enumerate(self.labels):
+                            row[f"{label}"] = round(confidence_scores[class_idx], 4)
+    
+                        top_idx = int(np.argmax(confidence_scores))
+                        row["Predicted Class"] = self.labels[top_idx]
+                        row["Top Score"] = round(confidence_scores[top_idx], 4)
+    
+                        all_results.append(row)
+                        
+    
+                    # Clear the batch
+                    batch_audio = []
+                    batch_paths = []
+                    print(f' {j} of {len(audio_files)} files done')
+    
+                        
+            # Final partial batch (if any)
+            if batch_audio:
+                batch_array = np.vstack(batch_audio)
+                predictions = self.predict_batch(batch_array)
+    
+                for i, prediction in enumerate(predictions):
+                    confidence_scores = scipy.special.expit(prediction)
+                    if max(confidence_scores) < self.confidence_thresh:
+                        continue
+    
+                    row = {
+                        "Begin Time (S)": 0,
+                        "End Time (S)": round(self.audio_duration, 2),
+                        "File": os.path.basename(batch_paths[i]),
+                        "FilePath": batch_paths[i],
+                        "Truth": Path(batch_paths[i]).parts[-2],
+                    }
+    
+                    for class_idx, label in enumerate(self.labels):
+                        row[f"{label}"] = round(confidence_scores[class_idx], 4)
+    
+                    top_idx = int(np.argmax(confidence_scores))
+                    row["Predicted Class"] = self.labels[top_idx]
+                    row["Top Score"] = round(confidence_scores[top_idx], 4)
+    
+                    all_results.append(row)
+    
+        final_df = pd.DataFrame(all_results)
+        print(f"Batch processing complete! {len(final_df)} predictions.")
+        return final_df
+
+
+    def export_to_raven(self, df, raven_file="raven_output.txt"):
+        df['Selection'] = range(1, df.shape[0] + 1)
+        df['Channel'] = 1
+        df['View'] = 'Spectrogram 1'
+
+        with open(raven_file, 'w') as f:
+            f.write("Selection\tView\tChannel\tBegin Time (S)\tEnd Time (S)\tCommon name\tScore\n")
+            for _, row in df.iterrows():
+                f.write(f"{row['Selection']}\t{row['View']}\t{row['Channel']}\t{row['Begin Time (S)']}\t"
+                        f"{row['End Time (S)']}\t{row['Predicted Class']}\t{row['Top Score']}\n")
+
+        print(f"Raven selection table exported to {raven_file}")
+
 
 
 import os

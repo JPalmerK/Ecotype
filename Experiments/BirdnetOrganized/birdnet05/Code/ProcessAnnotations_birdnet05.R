@@ -1,5 +1,4 @@
-# First birdnet will be a balanced datset across the labels with 3k each of
-# the ecotype labels. No attention will be paid to call types
+# Same as first birdnet save 6k detections
 
 # make it repeatable
 rm(list =ls())
@@ -14,30 +13,31 @@ trainIDX = c()
 for(label in labels){
   labelIdx = which(DCLDE_train$Labels == label) 
   
-  if (length(labelIdx)<3000)
-  {idx = sample(labelIdx, 3000, replace = TRUE)}
-  else{idx = sample(labelIdx, 3000, replace = FALSE)}
+  if (length(labelIdx)<6000)
+  {idx = sample(labelIdx, 6000, replace = TRUE)}
+  else{idx = sample(labelIdx, 6000, replace = FALSE)}
   trainIDX= c(trainIDX, idx)
   
   
 }
 
 # Write the database
-DCLDE_train_birdnet01 = DCLDE_train[trainIDX,]
+DCLDE_train_birdnet05 = DCLDE_train[trainIDX,]
 
 # Exclude alaska and offshore data
-DCLDE_train_birdnet01= DCLDE_train_birdnet01[DCLDE_train_birdnet01$Labels %in% 
+DCLDE_train_birdnet05= DCLDE_train_birdnet05[DCLDE_train_birdnet05$Labels %in% 
                                                c('Background', 'HW', 'SRKW','TKW'),]
 
-table(DCLDE_train_birdnet01$Labels)
-write.csv(DCLDE_train_birdnet01, 'DCLDE_train_birdnet01.csv')
+table(DCLDE_train_birdnet05$Labels)
+write.csv(DCLDE_train_birdnet05, 'DCLDE_train_birdnet05.csv')
 
 
 # Sanity check
-print(table(DCLDE_train_birdnet01$Labels))
-
+print(table(DCLDE_train_birdnet05$Labels))
+library(ggplot2)
+library(dplyr)
 # Plot label distribution by dataset
-label_dataset_counts <- DCLDE_train_birdnet01 %>%
+label_dataset_counts <- DCLDE_train_birdnet05 %>%
   group_by(Labels, Dataset) %>%
   summarise(Count = n(), .groups = 'drop')
 
