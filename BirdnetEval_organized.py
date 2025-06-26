@@ -216,8 +216,10 @@ def plot_confusion_matrix(
             x_coord = j + 0.5
             y_coord = i + 0.5
 
+            # Determine text color based on background brightness
+            text_color = "white" if val > 0.5 else "black"
+
             if i == j:
-                # On the diagonal, also show recall
                 cls_name = cm_df_norm.index[i]
                 row_info = RecallArray[RecallArray["Class"] == cls_name]
                 if not row_info.empty:
@@ -228,10 +230,8 @@ def plot_confusion_matrix(
                         text_str = f"{val:.2f}\nRecall: N/A"
                 else:
                     text_str = f"{val:.2f}"
-                text_color = "white"
             else:
                 text_str = f"{val:.2f}"
-                text_color = "black"
 
             ax.text(
                 x_coord,
@@ -242,6 +242,7 @@ def plot_confusion_matrix(
                 color=text_color,
                 fontsize=12
             )
+
 
     plt.ylabel("Predicted Class")
     plt.xlabel("True Class")
@@ -610,6 +611,128 @@ def plot_one_vs_others_pr(all_df,
 
     return pr_data, auc_pr_dict, mean_ap  # Return mAP as a separate output
 
+def plot_allKW_PR(all_df, 
+                          KW_truthNames=['SRKW', 'TKW', 'OKW', 'KW_und', 'NRKW'], 
+                          class_colors=None,
+                          titleStr="One-vs-Others Precision–Recall Curve"):
+    """
+    Generates a Precision–Recall curve for all killer whale calls. Anything
+    KW annotation, regardless of ecotype or not, that is identified as any 
+    one of the KW Ecotypes in the model output is considered a true positive
+
+    Parameters:
+    - all_df: DataFrame containing 'Truth', 'Class', and 'Score' columns.
+    - relevant_classes: List of class names to include in the comparison. If None, uses all classes.
+    - class_colors: Dictionary mapping class names to specific colors.
+    - titleStr: Title for the Precision–Recall curve plot.
+
+    Returns:
+    - pr_data: Dictionary containing precision-recall data for each class.
+    - auc_pr_dict: Dictionary containing AUC-PR values for each class.
+    - mean_ap: Mean Average Precision (mAP) across all classes.
+    """
+    
+    
+    all_df['isKW'] = all_df['Truth'] in KW_truthNames
+    
+    
+    # Define thresholds to sweep over
+    thresholds = np.linspace(0, 1, 200)
+
+
+    # Storage for precision–recall data and AUC-PR values
+    pr_data = {}
+    auc_pr_dict = {}  # Separate dictionary for AUC-PR values
+
+    plt.figure(figsize=(8, 6))
+
+    precision_list, recall_list = [], []
+
+    # Binary masks for positive class (truth)
+    is_truth_cls = all_df['Truth'] in KW_truthNames
+
+    for threshold in thresholds:
+        # TP: Correct predictions above threshold
+        TP = ((is_truth_cls) & (all_df['Top Score'] >= threshold)).sum()
+
+        # FP: Incorrect predictions above threshold
+        FP = ((~is_truth_cls) & (all_df['Top Score'] >= threshold)).sum()
+
+        # FN: Missed positives (either wrong class or too low score)
+        FN = (is_truth_cls & (all_df['Top Score'] < threshold)).sum()
+
+        # Precision calculation
+        precision = TP / (TP + FP) if (TP + FP) > 0 else 1.0
+
+        # Recall calculation
+        recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+
+        precision_list.append(precision)
+        recall_list.append(recall)
+    
+    # Compute area under PR curve (AUC-PR)
+    auc_pr = auc(recall_list, precision_list)
+
+    # Store results
+    pr_data = {
+        'thresholds': thresholds,
+        'precision': np.array(precision_list),
+        'recall': np.array(recall_list)
+    }
+
+    # Store AUC-PR in a separate dictionary
+    auc_pr_dict = auc_pr
+
+    # Plot Precision–Recall curve
+    plt.plot(recall_list, precision_list, color= "black")
+
+    # Compute mean average precision (mAP)
+    mean_ap = np.mean(list(auc_pr_dict.values()))
+
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(titleStr)
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    return pr_data, auc_pr_dict, mean_ap  # Return mAP as a separate output
+
+
+import matplotlib.pyplot as plt
+
+def compare_pr_curves(metrics_list, model_labels, target_class, title=None):
+    """
+    Plot precision-recall curves for a target class across multiple models.
+
+    Parameters:
+    - metrics_list: List of metric dictionaries (each structured like metrics_DCLDE_01)
+    - model_labels: List of names for each model (used in plot legend)
+    - target_class: String, e.g. 'SRKW', 'TKW', 'HW'
+    - title: Optional title for the plot
+    """
+    if len(metrics_list) != len(model_labels):
+        raise ValueError("metrics_list and model_labels must be the same length")
+
+    plt.figure(figsize=(8, 6))
+
+    for metrics, label in zip(metrics_list, model_labels):
+        try:
+            pr = metrics['pr_data'][target_class]
+            plt.plot(pr['recall'], pr['precision'], label=f"{label} (AUC: {metrics['AUC'].get(target_class, 'N/A'):.3f})")
+        except KeyError:
+            print(f"Warning: Class '{target_class}' not found in model '{label}'")
+            continue
+
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(title or f'Precision–Recall Curve for Class: {target_class}')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
 def find_cutoff(model, coef_index):
     return (np.log([0.90 / 0.10, 0.95 / 0.05, 0.99 / 0.01]) - model.params[0]) / model.params[coef_index]
 
@@ -705,7 +828,7 @@ def evaluate_model(eval_df,
     class_colors = {'SRKW': '#1f77b4', 'TKW': '#ff7f0e', 'HW': '#2ca02c', 'OKW': '#e377c2'}
     if plotPR:
         # Plot Precision–Recall curve
-        pr_data, auc_pr_dict, mean_ap = plot_one_vs_others_pr(
+        pr_data, auc_pr_dict, mean_ap = plot_one_vs_others_pr_with_kwund(
             eval_df, relevant_classes=list(custom_thresholds.keys()), 
                               class_colors=None, titleStr=pr_title)
        
@@ -727,6 +850,132 @@ def evaluate_model(eval_df,
     
     
     return metrics
+
+
+def plot_one_vs_others_pr_with_kwund(all_df, 
+                                     relevant_classes=None, 
+                                     class_colors=None,
+                                     titleStr="One-vs-Others Precision–Recall Curve (w/ KW_und)"):
+    """
+    Plots one-vs-all precision-recall curves for each known class, excluding KW_und.
+    Then separately evaluates a PR curve for KW_und annotations where any known KW prediction
+    is treated as a true positive, and any background prediction is a false positive.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import auc
+
+    # Define full sets
+    all_known_kw_labels = ['SRKW', 'TKW', 'OKW', 'NRKW']
+    # Only keep those that are actually in the DataFrame
+    present_kw_labels = [label for label in all_known_kw_labels if label in all_df.columns]
+
+    if not present_kw_labels:
+        raise ValueError("None of the known KW label columns (SRKW, TKW, OKW, NRKW) were found in the DataFrame.")
+
+    # Define background columns dynamically: any column not a KW label or meta
+    meta_cols = ['Truth', 'Class', 'Score']
+    background_labels = [c for c in all_df.columns 
+                         if c not in present_kw_labels + ['KW_und'] + meta_cols]
+
+    # Separate known ecotype examples from KW_und
+    df_known = all_df[all_df['Truth'] != 'KW_und'].copy()
+    df_kwund = all_df[all_df['Truth'] == 'KW_und'].copy()
+
+    if relevant_classes is None:
+        relevant_classes = np.unique(df_known['Class'])
+
+    default_colors = {
+        cls: plt.colormaps["tab10"].colors[i % 10]
+        for i, cls in enumerate(relevant_classes)
+    }
+    color_map = default_colors if class_colors is None else {**default_colors, **class_colors}
+
+    thresholds = np.linspace(0, 1, 200)
+    pr_data = {}
+    auc_pr_dict = {}
+
+    plt.figure(figsize=(8, 6))
+
+    # ---- PR curves for known classes ----
+    for cls in relevant_classes:
+        precision_list, recall_list = [], []
+        is_truth_cls = df_known['Truth'] == cls
+
+        for threshold in thresholds:
+            TP = ((is_truth_cls) & (df_known[cls] >= threshold)).sum()
+            FP = ((~is_truth_cls) & (df_known[cls] >= threshold)).sum()
+            FN = ((is_truth_cls) & (df_known[cls] < threshold)).sum()
+
+            precision = TP / (TP + FP) if (TP + FP) > 0 else 1.0
+            recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+
+            precision_list.append(precision)
+            recall_list.append(recall)
+
+        auc_pr = auc(recall_list, precision_list)
+
+        pr_data[cls] = {
+            'thresholds': thresholds,
+            'precision': np.array(precision_list),
+            'recall': np.array(recall_list)
+        }
+        auc_pr_dict[cls] = auc_pr
+
+        plt.plot(recall_list, precision_list, label=cls, 
+                 color=color_map.get(cls, "black"))
+
+    # ---- Special case: KW_und as TP if any KW label is predicted ----
+
+    if not df_kwund.empty:
+        precision_list_kw, recall_list_kw = [], []
+    
+        known_kw_set = set(['SRKW', 'TKW', 'OKW', 'NRKW'])
+        y_true = np.ones(len(df_kwund), dtype=bool)  # All positives
+        y_score = df_kwund['Top Score'].values
+        y_pred_kw = df_kwund['Predicted Class'].isin(known_kw_set)
+    
+        thresholds = np.linspace(0, 1, 200)
+        for thresh in thresholds:
+            # Predicted as KW and confident
+            TP = ((y_pred_kw) & (y_score >= thresh)).sum()
+            FP = ((~y_pred_kw) & (y_score >= thresh)).sum()
+            FN = ((y_score < thresh)).sum()  # Missed positive
+    
+            precision = TP / (TP + FP) if (TP + FP) > 0 else 1.0
+            recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+    
+            precision_list_kw.append(precision)
+            recall_list_kw.append(recall)
+    
+        auc_pr_kwund = auc(recall_list_kw, precision_list_kw)
+        pr_data['KW_und (any KW)'] = {
+            'thresholds': thresholds,
+            'precision': np.array(precision_list_kw),
+            'recall': np.array(recall_list_kw)
+        }
+        auc_pr_dict['KW_und (any KW)'] = auc_pr_kwund
+    
+        plt.plot(recall_list_kw, precision_list_kw,
+                 label='Unknown KW', linestyle='--', color='darkred')
+    
+    # ---- Wrap up ----
+    #mean_ap = np.mean([v for k, v in auc_pr_dict.items() if k != 'KW_und (any KW)'])
+    
+    # MAP of just relvenvet classes
+    mean_ap =(auc_pr_dict['HW']+auc_pr_dict['SRKW']+auc_pr_dict['TKW'])/3
+
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(titleStr)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.show()
+
+    return pr_data, auc_pr_dict, mean_ap
+
+
 
 # --- Main Evaluation Block ---
 if __name__ == "__main__":
@@ -775,13 +1024,14 @@ if __name__ == "__main__":
                 dclde_folders, 
                 output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv')
             
-            eval_dclde_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv', index=False)
+            eval_dclde_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet01_DCLDE_eval.csv', 
+                                         index=False)
     
     
     
     try:
         eval_malahat_birdnet_01 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet01_Malahat_eval.csv')
-        eval_malahat_birdnet_01 = eval_malahat_birdnet_01[eval_malahat_birdnet_01['Truth'] != 'KW_und'] 
+        #eval_malahat_birdnet_01 = eval_malahat_birdnet_01[eval_malahat_birdnet_01['Truth'] != 'KW_und'] 
 
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
@@ -789,8 +1039,7 @@ if __name__ == "__main__":
             model_config_01["model_path"], 
             model_config_01["label_path"], 
             malahat_folders, 
-            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet01_Malahat_eval.csv', 
-            classes=['SRKW','HW','TKW'])  
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet01_Malahat_eval.csv')  
         eval_malahat_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet01_Malahat_eval.csv', index=False)
         
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
@@ -837,7 +1086,7 @@ if __name__ == "__main__":
     # In this model we will have a total of 2k annotations for each class, however
     # We will balance across call types with at least 100 in each calltype.
     
-    model_config_01 = {
+    model_config_02 = {
         "model_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet02\Birdnet02.tflite",
         "label_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet02\Birdnet02_Labels.txt"
     }
@@ -860,26 +1109,25 @@ if __name__ == "__main__":
     
     try:
         eval_malahat_birdnet_02 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet02_Malahat_eval.csv')
-        eval_malahat_birdnet_02 = eval_malahat_birdnet_02[eval_malahat_birdnet_02['Truth'] != 'KW_und'] 
+        #eval_malahat_birdnet_02 = eval_malahat_birdnet_02[eval_malahat_birdnet_02['Truth'] != 'KW_und'] 
 
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
-        eval_malahat_birdnet_01 = process_multiple_datasets(
-            model_config_01["model_path"], 
-            model_config_01["label_path"], 
+        eval_malahat_birdnet_02 = process_multiple_datasets(
+            model_config_02["model_path"], 
+            model_config_02["label_path"], 
             malahat_folders, 
-            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet02_Malahat_eval.csv', 
-            classes=['SRKW','HW','TKW'])  
-        eval_malahat_birdnet_01.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet02_Malahat_eval.csv', index=False)
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet02_Malahat_eval.csv')  
+        eval_malahat_birdnet_02.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet02_Malahat_eval.csv', index=False)
         
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_01[eval_dclde_birdnet_01['Truth'] == "HW"],
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_02[eval_dclde_birdnet_02['Truth'] == "HW"],
                                     score_column="HW",  
                                     class_column="Predicted Class",  
                                     title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_01[eval_dclde_birdnet_01['Truth'] == "TKW"], 
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_02[eval_dclde_birdnet_02['Truth'] == "TKW"], 
                                     score_column="TKW", class_column="Predicted Class", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_01[eval_dclde_birdnet_01['Truth'] == "SRKW"], 
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_02[eval_dclde_birdnet_02['Truth'] == "SRKW"], 
                                     score_column="SRKW", class_column="Predicted Class", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
@@ -888,23 +1136,23 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_01[eval_malahat_birdnet_01['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_01[eval_malahat_birdnet_01['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_01[eval_malahat_birdnet_01['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_02[eval_malahat_birdnet_02['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_02[eval_malahat_birdnet_02['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_02[eval_malahat_birdnet_02['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
         "SRKW": srkw_cutoff_m
     }
     # Evaluate and plot DCLDE performance
-    metrics_DCLDE_02 = evaluate_model(eval_dclde_birdnet_01, 
+    metrics_DCLDE_02 = evaluate_model(eval_dclde_birdnet_02, 
                                       custom_thresholds=custom_thresholds_dclde, 
                                 pr_title="DCLDE Precision–Recall Curve 02", 
                                 roc_title="DCLDE ROC Curve 02")
     
 
     # Evaluate and plot Malahat performance
-    metrics_malahat_02 = evaluate_model(eval_malahat_birdnet_01, 
+    metrics_malahat_02 = evaluate_model(eval_malahat_birdnet_02, 
                                         custom_thresholds=custom_thresholds_dclde, 
                                   pr_title="Malahat Precision–Recall Curve 02",
                                   roc_title="Malahat ROC Curve 02")
@@ -930,14 +1178,14 @@ if __name__ == "__main__":
                 dclde_folders, 
                 output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_DCLDE_eval.csv')
             
-            eval_dclde_birdnet_03.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_DCLDE_eval.csv', index=False)
+            eval_dclde_birdnet_03.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_DCLDE_eval.csv',
+                                         index=False)
     
     
     
     try:
         eval_malahat_birdnet_03 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet03_Malahat_eval.csv')
-        eval_malahat_birdnet_03 = eval_malahat_birdnet_03[eval_malahat_birdnet_03['Truth'] != 'KW_und'] 
-
+      
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_03 = process_multiple_datasets(
@@ -1013,8 +1261,7 @@ if __name__ == "__main__":
     
     try:
         eval_malahat_birdnet_04 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet04_Malahat_eval.csv')
-        eval_malahat_birdnet_04 = eval_malahat_birdnet_04[eval_malahat_birdnet_04['Truth'] != 'KW_und'] 
-
+    
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_04 = process_multiple_datasets(
@@ -1089,8 +1336,7 @@ if __name__ == "__main__":
     
     try:
         eval_malahat_birdnet_05 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet05_Malahat_eval.csv')
-        eval_malahat_birdnet_05 = eval_malahat_birdnet_05[eval_malahat_birdnet_05['Truth'] != 'KW_und'] 
-
+       
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_05 = process_multiple_datasets(
@@ -1166,7 +1412,6 @@ if __name__ == "__main__":
     
     try:
         eval_malahat_birdnet_06 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet06_Malahat_eval.csv')
-        eval_malahat_birdnet_06 = eval_malahat_birdnet_06[eval_malahat_birdnet_06['Truth'] != 'KW_und'] 
         
 
     except:            
@@ -1243,9 +1488,7 @@ if __name__ == "__main__":
     
     try:
         eval_malahat_birdnet_07 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet07_Malahat_eval.csv')
-        # Exclude unidentified KW detections for test
-        eval_malahat_birdnet_07 = eval_malahat_birdnet_07[eval_malahat_birdnet_07['Truth'] != 'KW_und'] 
-    
+       
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
         eval_malahat_birdnet_07 = process_multiple_datasets(
@@ -1290,7 +1533,7 @@ if __name__ == "__main__":
     
     
     # Evaluate and plot Malahat performance
-    metrics_malahat_07 = evaluate_model(eval_dclde_birdnet_07, 
+    metrics_malahat_07 = evaluate_model(eval_malahat_birdnet_07, 
                                         custom_thresholds=custom_thresholds_malahat, 
                                   pr_title="Malahat Precision–Recall Curve 07",
                                   roc_title="Malahat ROC Curve 07")
@@ -1298,54 +1541,62 @@ if __name__ == "__main__":
     
     
     
-    #%% Birdnet Previous model 3
-    ########################################################################
-    # Run at 15khz in birdnet app
+    #%% Birdnet 08- birdnet 07 but Ecotype-balanced with augmentation and stratified background
+    
+    # Filters Ecotype directly and excludes ambiguous call types manually
+    # Explicit mapping of call types (N01, S03, etc.) to each ecotype using a custom assign_calltype() function
+    # Augmentation Applied per ecotype using ecotype-specific calltype lists, then pads with unannotated ecotype data
+    # Stratified across Provider before sampling 4600 examples each
+    # Filters out a detailed list of call types (Buzz, Whistle, Unk, etc.) and excludes annotations with a ?
+    # Augments every mapped calltype to ensure representation per ecotype
     
     
-    model_config_03_previous = {
-        "model_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Birdnet7Class_ONC_Larger\\CustomClassifier.tflite",
-        "label_path": r"C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdNET\\Birdnet7Class_ONC_Larger\\CustomClassifier_Labels.txt"
+    
+    model_config_08 = {
+        "model_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet08\Birdnet08.tflite",
+        "label_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet08\Birdnet08_Labels.txt"
     }
     
     
     
     try:
-        eval_dclde_birdnet_03_previous = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_previous_DCLDE_eval.csv')
+        eval_dclde_birdnet_08 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet08_DCLDE_eval.csv')
     except:
             # Process all DCLDE datasets into one DataFrame.
-            eval_dclde_birdnet_03_previous = process_multiple_datasets(
-                model_config_03_previous["model_path"],
-                model_config_03_previous["label_path"], 
+            eval_dclde_birdnet_08 = process_multiple_datasets(
+                model_config_08["model_path"],
+                model_config_08["label_path"], 
                 dclde_folders, 
-                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_previous_DCLDE_eval.csv')
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet08_DCLDE_eval.csv')
             
-            eval_dclde_birdnet_03_previous.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet03_previous_DCLDE_eval.csv', index=False)
+            eval_dclde_birdnet_08.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet08_DCLDE_eval.csv', index=False)
     
     
     
     try:
-        eval_malahat_birdnet_03_previous = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet03_previous_Malahat_eval.csv')
-        eval_malahat_birdnet_03_previous = eval_malahat_birdnet_03_previous[eval_malahat_birdnet_03_previous['Truth'] != 'KW_und'] 
-   
+        eval_malahat_birdnet_08 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet08_Malahat_eval.csv')
+        # Exclude unidentified KW detections for test
+        
     except:            
         # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
-        eval_malahat_birdnet_03_previous = process_multiple_datasets(
-            model_config_03_previous["model_path"], 
-            model_config_03_previous["label_path"], 
+        eval_malahat_birdnet_08 = process_multiple_datasets(
+            model_config_08["model_path"], 
+            model_config_08["label_path"], 
             malahat_folders, 
-            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet03_previous_Malahat_eval.csv', 
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet08_Malahat_eval.csv', 
             classes=['SRKW','HW','TKW'])  
-        eval_malahat_birdnet_03_previous.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet03_previous_Malahat_eval.csv', index=False)
+        eval_malahat_birdnet_08.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet08_Malahat_eval.csv', index=False)
+        
+        
         
     # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
-    hw_cutoff   = compute_threshold(eval_dclde_birdnet_03_previous[eval_dclde_birdnet_03_previous['Truth'] == "HW"],
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_08[eval_dclde_birdnet_08['Truth'] == "HW"],
                                     score_column="HW",  
                                     class_column="Predicted Class",  
                                     title_suffix="Humpback")
-    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_03_previous[eval_dclde_birdnet_03_previous['Truth'] == "TKW"], 
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_08[eval_dclde_birdnet_08['Truth'] == "TKW"], 
                                     score_column="TKW", class_column="Predicted Class", title_suffix="TKW")
-    srkw_cutoff = compute_threshold(eval_dclde_birdnet_03_previous[eval_dclde_birdnet_03_previous['Truth'] == "SRKW"], 
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_08[eval_dclde_birdnet_08['Truth'] == "SRKW"], 
                                     score_column="SRKW", class_column="Predicted Class", title_suffix="SRKW")
     custom_thresholds_dclde = {
         "HW": hw_cutoff,
@@ -1354,26 +1605,211 @@ if __name__ == "__main__":
     }
     
     # Compute thresholds for Malahat data
-    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_03_previous[eval_malahat_birdnet_03_previous['Truth'] == "HW"], class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
-    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_03_previous[eval_malahat_birdnet_03_previous['Truth'] == "TKW"], class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
-    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_03_previous[eval_malahat_birdnet_03_previous['Truth'] == "SRKW"], class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_08[eval_malahat_birdnet_08['Truth'] == "HW"], 
+                                      class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_08[eval_malahat_birdnet_08['Truth'] == "TKW"], 
+                                      class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_08[eval_malahat_birdnet_08['Truth'] == "SRKW"], 
+                                      class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
     custom_thresholds_malahat = {
         "HW": hw_cutoff_m,
         "TKW": tkw_cutoff_m,
         "SRKW": srkw_cutoff_m
     }
     # Evaluate and plot DCLDE performance
-    metrics_DCLDE_03_previous = evaluate_model(eval_dclde_birdnet_03_previous, 
-                                      custom_thresholds=custom_thresholds_dclde, 
-                                pr_title="DCLDE Precision–Recall Curve 03_previous", 
-                                roc_title="DCLDE ROC Curve 03_previous")
+    metrics_DCLDE_08 = evaluate_model(eval_dclde_birdnet_08, 
+                                      custom_thresholds=custom_thresholds_malahat, 
+                                pr_title="DCLDE Precision–Recall Curve 08", 
+                                roc_title="DCLDE ROC Curve 08")
     
     
     # Evaluate and plot Malahat performance
-    metrics_malahat_03_previous = evaluate_model(eval_malahat_birdnet_03_previous, 
-                                        custom_thresholds=custom_thresholds_dclde, 
-                                  pr_title="Malahat Precision–Recall Curve 03_previous",
-                                  roc_title="Malahat ROC Curve 03_previous")  
+    metrics_malahat_08 = evaluate_model(eval_malahat_birdnet_08, 
+                                        custom_thresholds=custom_thresholds_malahat, 
+                                  pr_title="Malahat Precision–Recall Curve 08",
+                                  roc_title="Malahat ROC Curve 08")
+ 
+    #%% Birdnet 09- birdnet 08 2k files and only HW, SRKW, TKW
     
-    # Extract missed SRKW
+    # Filters Ecotype directly and excludes ambiguous call types manually
+    # Explicit mapping of call types (N01, S03, etc.) to each ecotype using a custom assign_calltype() function
+    # Augmentation Applied per ecotype using ecotype-specific calltype lists, then pads with unannotated ecotype data
+    # Stratified across Provider before sampling 4600 examples each
+    # Filters out a detailed list of call types (Buzz, Whistle, Unk, etc.) and excludes annotations with a ?
+    # Augments every mapped calltype to ensure representation per ecotype
     
+    
+    
+    model_config_09 = {
+        "model_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet09\Birdnet09.tflite",
+        "label_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet09\Birdnet09_Labels.txt"
+    }
+    
+    
+    
+    try:
+        eval_dclde_birdnet_09 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet09_DCLDE_eval.csv')
+    except:
+            # Process all DCLDE datasets into one DataFrame.
+            eval_dclde_birdnet_09 = process_multiple_datasets(
+                model_config_09["model_path"],
+                model_config_09["label_path"], 
+                dclde_folders, 
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet09_DCLDE_eval.csv')
+            
+            eval_dclde_birdnet_09.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet09_DCLDE_eval.csv', index=False)
+    
+    
+    
+    try:
+        eval_malahat_birdnet_09 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet09_Malahat_eval.csv')
+        # Exclude unidentified KW detections for test
+        
+    except:            
+        # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
+        eval_malahat_birdnet_09 = process_multiple_datasets(
+            model_config_09["model_path"], 
+            model_config_09["label_path"], 
+            malahat_folders, 
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet09_Malahat_eval.csv', 
+            classes=['SRKW','HW','TKW'])  
+        eval_malahat_birdnet_09.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet09_Malahat_eval.csv', index=False)
+        
+        
+        
+    # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_09[eval_dclde_birdnet_09['Truth'] == "HW"],
+                                    score_column="HW",  
+                                    class_column="Predicted Class",  
+                                    title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_09[eval_dclde_birdnet_09['Truth'] == "TKW"], 
+                                    score_column="TKW", class_column="Predicted Class", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_09[eval_dclde_birdnet_09['Truth'] == "SRKW"], 
+                                    score_column="SRKW", class_column="Predicted Class", title_suffix="SRKW")
+    custom_thresholds_dclde = {
+        "HW": hw_cutoff,
+        "TKW": tkw_cutoff,
+        "SRKW": srkw_cutoff
+    }
+    
+    # Compute thresholds for Malahat data
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_09[eval_malahat_birdnet_09['Truth'] == "HW"], 
+                                      class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_09[eval_malahat_birdnet_09['Truth'] == "TKW"], 
+                                      class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_09[eval_malahat_birdnet_09['Truth'] == "SRKW"], 
+                                      class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
+    custom_thresholds_malahat = {
+        "HW": hw_cutoff_m,
+        "TKW": tkw_cutoff_m,
+        "SRKW": srkw_cutoff_m
+    }
+    # Evaluate and plot DCLDE performance
+    metrics_DCLDE_09 = evaluate_model(eval_dclde_birdnet_09, 
+                                      custom_thresholds=custom_thresholds_dclde, 
+                                pr_title="DCLDE Precision–Recall Curve 09", 
+                                roc_title="DCLDE ROC Curve 09")
+    
+    
+    # Evaluate and plot Malahat performance
+    metrics_malahat_09 = evaluate_model(eval_malahat_birdnet_09, 
+                                        custom_thresholds=custom_thresholds_malahat, 
+                                  pr_title="Malahat Precision–Recall Curve 09",
+                                  roc_title="Malahat ROC Curve 09")    
+    #%% Combine metrics for sanity
+
+    modelNames = address = ['birdNET_01','birdNET_02',
+                            'birdNET_03', 'birdNET_04',
+                            'birdNET_05', 'birdNET_06',
+                            'birdNET_07', 'birdNet_08', 'birdNet_09']
+
+
+    AUCDCLDE = pd.DataFrame([
+        metrics_DCLDE_01['AUC'],
+        metrics_DCLDE_02['AUC'],
+        metrics_DCLDE_03['AUC'],
+                  metrics_DCLDE_04['AUC'],
+                  metrics_DCLDE_05['AUC'],
+                  metrics_DCLDE_06['AUC'],
+                  metrics_malahat_07['AUC'],
+                  metrics_malahat_08['AUC'],
+                  metrics_malahat_09['AUC']]).fillna(0)
+    AUCDCLDE['Model'] =modelNames
+
+
+    MAP_DCLDE = pd.DataFrame([metrics_DCLDE_01['MAP'],
+                              metrics_DCLDE_02['MAP'],
+                              metrics_DCLDE_03['MAP'],
+                  metrics_DCLDE_04['MAP'],
+                  metrics_DCLDE_05['MAP'],
+                  metrics_DCLDE_06['MAP'],
+                  metrics_DCLDE_07['MAP'],
+                  metrics_DCLDE_08['MAP'], 
+                  metrics_DCLDE_09['MAP']]).fillna(0)
+    MAP_DCLDE['Model'] =modelNames
+
+
+
+    AUCMalahat= pd.DataFrame([
+        metrics_DCLDE_01['AUC'],
+        metrics_DCLDE_02['AUC'],
+        metrics_malahat_03['AUC'],
+                  metrics_malahat_04['AUC'],
+                  metrics_malahat_05['AUC'],
+                  metrics_malahat_06['AUC'],
+                  metrics_malahat_07['AUC'], 
+                  metrics_malahat_08['AUC'],
+                  metrics_malahat_09['AUC']]).fillna(0)
+    
+    AUCMalahat['Model'] =modelNames
+
+    MAP_Malahat= pd.DataFrame([
+        metrics_malahat_01['MAP'],
+        metrics_malahat_02['MAP'],
+        metrics_malahat_03['MAP'],
+                  metrics_malahat_04['MAP'],
+                  metrics_malahat_05['MAP'],
+                  metrics_malahat_06['MAP'],
+                  metrics_malahat_07['MAP'], 
+                  metrics_malahat_08['MAP'],
+                  metrics_malahat_09['MAP']]).fillna(0)
+    MAP_Malahat['Model'] =modelNames
+
+
+compare_pr_curves(
+    metrics_list=[metrics_DCLDE_01, metrics_DCLDE_02, metrics_DCLDE_09],
+    model_labels=["DCLDE_01", "DCLDE_02","DCLDE_03","DCLDE_04",
+                  "DCLDE_05","DCLDE_06","DCLDE_07","DCLDE_08","DCLDE_09"],
+    target_class="SRKW"
+)
+compare_pr_curves(
+    metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
+                  metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
+                  metrics_malahat_07,metrics_malahat_08,
+                  metrics_malahat_09],
+    model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
+                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09"],
+    target_class="SRKW"
+)
+
+compare_pr_curves(
+    metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
+                  metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
+                  metrics_malahat_07,metrics_malahat_08,
+                  metrics_malahat_09],
+    model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
+                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09"],
+    target_class="TKW"
+)
+
+compare_pr_curves(
+    metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
+                  metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
+                  metrics_malahat_07,metrics_malahat_08,
+                  metrics_malahat_09],
+    model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
+                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09"],
+    target_class="HW"
+)
+
+
