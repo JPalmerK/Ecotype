@@ -47,7 +47,7 @@ kw_cats <- list(
 )
 
 
-nExamples = 2000
+nExamples = 3000
 
 assign_calltype <- function(df, call_list, label) {
   rows <- lapply(call_list, function(ct) {
@@ -57,6 +57,8 @@ assign_calltype <- function(df, call_list, label) {
   })
   bind_rows(rows)
 }
+
+nCalltypeReplicates = 200
 
 # Assign calltype categories
 balanced_ecotypes <- list()
@@ -72,8 +74,8 @@ for (label in kw_labels) {
   augmented <- calls_labeled
   for (ct in calltypes) {
     subdf <- calls_labeled %>% filter(CalltypeCategory == ct)
-    if (nrow(subdf) < 100) {
-      to_add <- 100 - nrow(subdf)
+    if (nrow(subdf) < nCalltypeReplicates) {
+      to_add <- nCalltypeReplicates - nrow(subdf)
       sampled <- subdf %>% slice_sample(n = to_add, replace = TRUE)
       shifts <- floor(runif(to_add, -50, 50)) / 100 * sampled$Duration
       sampled$FileBeginSec <- sampled$FileBeginSec + shifts
@@ -115,7 +117,7 @@ BG_df <- DCLDE_train %>%
   mutate(Labels = "Background")
 
 # Combine everything
-birdnet09 <- bind_rows(
+birdnet10 <- bind_rows(
   balanced_ecotypes$NRKW,
   balanced_ecotypes$OKW,
   balanced_ecotypes$SRKW,
@@ -125,18 +127,16 @@ birdnet09 <- bind_rows(
 )
 
 # Sanity check
-print(table(birdnet09$Labels))
+print(table(birdnet10$Labels))
+
 
 # Save final dataset
-#write_csv(birdnet09, 'DCLDE_train_birdnet09_balanced_2000perclass.csv')
-
-# Save final dataset
-birdnet09 = write_csv(birdnet09, 'DCLDE_train_birdnet09_balanced_2000perclass.csv')
+birdnet10 = write_csv(birdnet10, 'DCLDE_train_birdnet10.csv')
 
 library(ggplot2)
 
 # Plot label distribution by dataset
-label_dataset_counts <- birdnet09 %>%
+label_dataset_counts <- birdnet10 %>%
   group_by(Labels, Dataset) %>%
   summarise(Count = n(), .groups = 'drop')
 

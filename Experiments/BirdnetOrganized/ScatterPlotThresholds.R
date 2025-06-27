@@ -8,7 +8,7 @@ library(ggplot2)
 # 1. Load and combine all model outputs
 # -------------------------------
 folder <- "C:/Users/kaity/Documents/GitHub/Ecotype/Experiments/BirdnetOrganized"
-model_ids <- sprintf("%02d", 1:9)
+model_ids <- sprintf("%02d", 1:10)
 model_names <- paste0("Birdnet", model_ids)
 file_paths <- file.path(folder, paste0(model_names, "_Malahat_eval.csv"))
 
@@ -31,7 +31,8 @@ thresh_values <- c(
   0.3600,  0.553,   0.4905,
   0.2047,  0.5167,  0.485,
   0.2047,  0.516,   0.4855,
-  0.4653,  0.565,   0.4743
+  0.4653,  0.565,   0.4743,
+  0.4653,  0.565,   0.4743 # wrong
 )
 threshold_table <- expand.grid(
   Model = model_names,
@@ -51,6 +52,7 @@ all_preds <- all_preds %>%
 # -------------------------------
 # 3. Classify each row based on per-class threshold
 # -------------------------------
+ecotype_classes <- c("SRKW", "TKW", "HW")  # Set class list
 all_preds <- all_preds %>%
   rowwise() %>%
   mutate(
