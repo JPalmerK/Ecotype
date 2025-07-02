@@ -8,7 +8,7 @@ library(ggplot2)
 # 1. Load and combine all model outputs
 # -------------------------------
 folder <- "C:/Users/kaity/Documents/GitHub/Ecotype/Experiments/BirdnetOrganized"
-model_ids <- sprintf("%02d", 1:10)
+model_ids <- sprintf("%02d", 1:11)
 model_names <- paste0("Birdnet", model_ids)
 file_paths <- file.path(folder, paste0(model_names, "_Malahat_eval.csv"))
 
@@ -32,8 +32,9 @@ thresh_values <- c(
   0.2047,  0.5167,  0.485,
   0.2047,  0.516,   0.4855,
   0.4653,  0.565,   0.4743,
-  0.4653,  0.565,   0.4743 # wrong
-)
+  0.4787,  0.5247,   0.4716,
+  0.3236,  0.6184,   0.4096)
+
 threshold_table <- expand.grid(
   Model = model_names,
   Class = c("SRKW", "TKW", "HW")
@@ -115,10 +116,66 @@ performance_df <- bind_rows(
 # -------------------------------
 # 6. Plot Two-Axis Performance Map
 # -------------------------------
+performance_df$CorrectClassification = 1 -performance_df$Confusion
+
 ggplot(performance_df, aes(x = Recall_SRKW, y = Recall_TKW)) +
   geom_point(aes(size = Confusion, color = Model), alpha = 0.75) +
   geom_text(aes(label = Model), nudge_y = 0.01, size = 3) +
   scale_size_continuous(range = c(2, 10), name = "SRKW↔TKW Confusion") +
   labs(title = "SRKW vs TKW Recall and Confusion",
-       x = "Recall (SRKW)", y = "Recall (TKW") +
+       x = "Recall (SRKW)", y = "Recall (TKW)") +
+  guides(color = "none") +
+  theme_minimal()
+
+ggplot(performance_df, aes(x = Recall_SRKW, y = Recall_TKW)) +
+  geom_point(aes(size = CorrectClassification, color = Model), alpha = 0.75) +
+  geom_text(aes(label = Model), nudge_y = 0.02, size = 3) +
+  scale_size_continuous(range = c(2, 10), name = "SRKW↔TKW\nClassification") +
+  labs(title = "SRKW vs TKW Recall and Confusion",
+       x = "Recall (SRKW)", y = "Recall (TKW)") +
+  guides(color = "none") +
+  theme_minimal()
+
+
+# -----------------------------------
+# 7. Extract SRKW vs HW Performance
+# -----------------------------------
+extract_srkw_hw_metrics <- function(cm, model_name) {
+  get_safe <- function(mat, row, col) {
+    if (row %in% rownames(mat) && col %in% colnames(mat)) mat[row, col] else 0
+  }
+  
+  total_SRKW <- sum(cm[, "SRKW"]);
+  total_HW   <- sum(cm[, "HW"]);
+  
+  TP_SRKW <- get_safe(cm, "SRKW", "SRKW")
+  TP_HW   <- get_safe(cm, "HW", "HW")
+  
+  Conf_SRKW_HW <- get_safe(cm, "HW", "SRKW") / total_SRKW
+  Conf_HW_SRKW <- get_safe(cm, "SRKW", "HW") / total_HW
+  
+  tibble(
+    Model = model_name,
+    Recall_SRKW = TP_SRKW / total_SRKW,
+    Recall_HW   = TP_HW / total_HW,
+    Confusion = mean(c(Conf_SRKW_HW, Conf_HW_SRKW))
+  )
+}
+
+performance_df_hw <- bind_rows(
+  lapply(names(cm_list), function(m) extract_srkw_hw_metrics(cm_list[[m]], m))
+)
+
+performance_df_hw$CorrectClassification = 1 - performance_df_hw$Confusion
+
+# -----------------------------------
+# 8. Plot SRKW vs HW Confusion Map
+# -----------------------------------
+ggplot(performance_df_hw, aes(x = Confusion, y = Recall_HW)) +
+  geom_point(aes(size = CorrectClassification, color = Model), alpha = 0.75) +
+  geom_text(aes(label = Model), nudge_y = 0.02, size = 3) +
+  scale_size_continuous(range = c(2, 10), name = "SRKW↔HW\nConfusion") +
+  labs(title = "SRKW vs HW Recall and Confusion",
+       x = "Recall (SRKW)", y = "Recall (HW)") +
+  guides(color = "none") +
   theme_minimal()
