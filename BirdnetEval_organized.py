@@ -1804,16 +1804,96 @@ if __name__ == "__main__":
     
     # Evaluate and plot Malahat performance
     metrics_malahat_10 = evaluate_model(eval_malahat_birdnet_10, 
-                                        custom_thresholds=custom_thresholds_malahat, 
+                                        custom_thresholds=custom_thresholds_dclde, 
                                   pr_title="Malahat Precision–Recall Curve 10",
                                   roc_title="Malahat ROC Curve 10")   
+    
+    #%% Birdnet 11
+    
+    
+    model_config_11 = {
+        "model_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet11\Birdnet11.tflite",
+        "label_path": r"C:\Users\kaity\Documents\GitHub\Ecotype\Experiments\BirdnetOrganized\Birdnet11\Birdnet11_Labels.txt"
+    }
+    
+    
+    
+    try:
+        eval_dclde_birdnet_11 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet11_DCLDE_eval.csv')
+    except:
+            # Process all DCLDE datasets into one DataFrame.
+            eval_dclde_birdnet_11 = process_multiple_datasets(
+                model_config_11["model_path"],
+                model_config_11["label_path"], 
+                dclde_folders, 
+                output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet11_DCLDE_eval.csv')
+            
+            eval_dclde_birdnet_11.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\BirdnetOrganized\Birdnet11_DCLDE_eval.csv', index=False)
+    
+    
+    
+    try:
+        eval_malahat_birdnet_11 = pd.read_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\Birdnet11_Malahat_eval.csv')
+        # Exclude unidentified KW detections for test
+        
+    except:            
+        # Process Malahat datasets; note that we adjust the list of classes if OKW is not present.
+        eval_malahat_birdnet_11 = process_multiple_datasets(
+            model_config_11["model_path"], 
+            model_config_11["label_path"], 
+            malahat_folders, 
+            output_csv='C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet11_Malahat_eval.csv', 
+            classes=['SRKW','HW','TKW'])  
+        eval_malahat_birdnet_11.to_csv('C:\\Users\\kaity\\Documents\\GitHub\\Ecotype\\Experiments\\BirdnetOrganized\\Birdnet11_Malahat_eval.csv', index=False)
+        
+        
+        
+    # Compute custom thresholds for DCLDE (for OKW we use a fixed value)
+    hw_cutoff   = compute_threshold(eval_dclde_birdnet_11[eval_dclde_birdnet_11['Truth'] == "HW"],
+                                    score_column="HW",  
+                                    class_column="Predicted Class",  
+                                    title_suffix="Humpback")
+    tkw_cutoff  = compute_threshold(eval_dclde_birdnet_11[eval_dclde_birdnet_11['Truth'] == "TKW"], 
+                                    score_column="TKW", class_column="Predicted Class", title_suffix="TKW")
+    srkw_cutoff = compute_threshold(eval_dclde_birdnet_11[eval_dclde_birdnet_11['Truth'] == "SRKW"], 
+                                    score_column="SRKW", class_column="Predicted Class", title_suffix="SRKW")
+    custom_thresholds_dclde = {
+        "HW": hw_cutoff,
+        "TKW": tkw_cutoff,
+        "SRKW": srkw_cutoff
+    }
+    
+    # Compute thresholds for Malahat data
+    hw_cutoff_m   = compute_threshold(eval_malahat_birdnet_11[eval_malahat_birdnet_11['Truth'] == "HW"], 
+                                      class_column="Predicted Class", score_column="HW", title_suffix="Malahat HW")
+    tkw_cutoff_m  = compute_threshold(eval_malahat_birdnet_11[eval_malahat_birdnet_11['Truth'] == "TKW"], 
+                                      class_column="Predicted Class", score_column="TKW", title_suffix="Malahat TKW")
+    srkw_cutoff_m = compute_threshold(eval_malahat_birdnet_11[eval_malahat_birdnet_11['Truth'] == "SRKW"], 
+                                      class_column="Predicted Class", score_column="SRKW", title_suffix="Malahat SRKW")
+    custom_thresholds_malahat = {
+        "HW": hw_cutoff_m,
+        "TKW": tkw_cutoff_m,
+        "SRKW": srkw_cutoff_m
+    }
+    # Evaluate and plot DCLDE performance
+    metrics_DCLDE_11 = evaluate_model(eval_dclde_birdnet_11, 
+                                      custom_thresholds=custom_thresholds_dclde, 
+                                pr_title="DCLDE Precision–Recall Curve 11", 
+                                roc_title="DCLDE ROC Curve 11")
+    
+    
+    # Evaluate and plot Malahat performance
+    metrics_malahat_11 = evaluate_model(eval_malahat_birdnet_11, 
+                                        custom_thresholds=custom_thresholds_malahat, 
+                                  pr_title="Malahat Precision–Recall Curve 11",
+                                  roc_title="Malahat ROC Curve 11")   
     #%% Combine metrics for sanity
 
     modelNames = address = ['birdNET_01','birdNET_02',
                             'birdNET_03', 'birdNET_04',
                             'birdNET_05', 'birdNET_06',
                             'birdNET_07', 'birdNet_08', 'birdNet_09',
-                            'birdNet_10']
+                            'birdNet_10', 'birdNet_11']
 
 
     AUCDCLDE = pd.DataFrame([
@@ -1825,7 +1905,9 @@ if __name__ == "__main__":
                   metrics_DCLDE_06['AUC'],
                   metrics_malahat_07['AUC'],
                   metrics_malahat_08['AUC'],
-                  metrics_malahat_09['AUC'],metrics_malahat_10['AUC']]).fillna(0)
+                  metrics_malahat_09['AUC'],
+                  metrics_malahat_10['AUC'],
+                  metrics_malahat_11['AUC']]).fillna(0)
     AUCDCLDE['Model'] =modelNames
 
 
@@ -1837,21 +1919,25 @@ if __name__ == "__main__":
                   metrics_DCLDE_06['MAP'],
                   metrics_DCLDE_07['MAP'],
                   metrics_DCLDE_08['MAP'], 
-                  metrics_DCLDE_09['MAP'], metrics_DCLDE_10['MAP']]).fillna(0)
+                  metrics_DCLDE_09['MAP'], 
+                  metrics_DCLDE_10['MAP'],
+                  metrics_DCLDE_11['MAP']]).fillna(0)
     MAP_DCLDE['Model'] =modelNames
 
 
 
     AUCMalahat= pd.DataFrame([
-        metrics_DCLDE_01['AUC'],
-        metrics_DCLDE_02['AUC'],
+        metrics_malahat_01['AUC'],
+        metrics_malahat_02['AUC'],
         metrics_malahat_03['AUC'],
                   metrics_malahat_04['AUC'],
                   metrics_malahat_05['AUC'],
                   metrics_malahat_06['AUC'],
                   metrics_malahat_07['AUC'], 
                   metrics_malahat_08['AUC'],
-                  metrics_malahat_09['AUC'],metrics_malahat_10['AUC']]).fillna(0)
+                  metrics_malahat_09['AUC'],
+                  metrics_malahat_10['AUC'],
+                  metrics_malahat_11['AUC']]).fillna(0)
     
     AUCMalahat['Model'] =modelNames
 
@@ -1864,28 +1950,33 @@ if __name__ == "__main__":
                   metrics_malahat_06['MAP'],
                   metrics_malahat_07['MAP'], 
                   metrics_malahat_08['MAP'],
-                  metrics_malahat_09['MAP'], metrics_malahat_10['AUC']]).fillna(0)
+                  metrics_malahat_09['MAP'], 
+                  metrics_malahat_10['MAP'], 
+                  metrics_malahat_11['MAP']]).fillna(0)
     MAP_Malahat['Model'] =modelNames
 
+#%% Plot the precision recall curves
 
-
+# Malahat
 compare_pr_curves(
     metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
                   metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
                   metrics_malahat_07,metrics_malahat_08,
-                  metrics_malahat_09, metrics_malahat_10],
+                  metrics_malahat_09, metrics_malahat_10, metrics_malahat_11],
     model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
                   "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08",
-                  "MALAHAT_09", "MALAHAT_10"],
+                  "MALAHAT_09", "MALAHAT_10", "MALAHAT_11"],
     target_class="SRKW")
 
 compare_pr_curves(
     metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
                   metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
                   metrics_malahat_07,metrics_malahat_08,
-                  metrics_malahat_09, metrics_malahat_10],
+                  metrics_malahat_09, metrics_malahat_10, 
+                  metrics_malahat_11],
     model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
-                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09"],
+                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09",
+                  "MALAHAT_10", "MALAHAT_11"],
     target_class="TKW"
 )
 
@@ -1893,10 +1984,56 @@ compare_pr_curves(
     metrics_list=[metrics_malahat_01, metrics_malahat_02,metrics_malahat_03,
                   metrics_malahat_04,metrics_malahat_05,metrics_malahat_06,
                   metrics_malahat_07,metrics_malahat_08,
-                  metrics_malahat_09, metrics_malahat_10],
+                  metrics_malahat_09, metrics_malahat_10, 
+                  metrics_malahat_11],
     model_labels=["MALAHAT_01", "MALAHAT_02","MALAHAT_03","MALAHAT_04",
-                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09"],
+                  "MALAHAT_05","MALAHAT_06","MALAHAT_07","MALAHAT_08","MALAHAT_09",
+                  "MALAHAT_10", "MALAHAT_11"],
     target_class="HW"
 )
 
+# DCLDE 
+compare_pr_curves(
+    metrics_list=[metrics_DCLDE_01, metrics_DCLDE_02,metrics_DCLDE_03,
+                  metrics_DCLDE_04,metrics_DCLDE_05,metrics_DCLDE_06,
+                  metrics_DCLDE_07,metrics_DCLDE_08,
+                  metrics_DCLDE_09, metrics_DCLDE_10, metrics_DCLDE_11],
+    model_labels=["DCLDE_01", "DCLDE_02","DCLDE_03","DCLDE_04",
+                  "DCLDE_05","DCLDE_06","DCLDE_07","DCLDE_08",
+                  "DCLDE_09", "DCLDE_10", "DCLDE_11"],
+    target_class="SRKW")
 
+compare_pr_curves(
+    metrics_list=[metrics_DCLDE_01, metrics_DCLDE_02,metrics_DCLDE_03,
+                  metrics_DCLDE_04,metrics_DCLDE_05,metrics_DCLDE_06,
+                  metrics_DCLDE_07,metrics_DCLDE_08,
+                  metrics_DCLDE_09, metrics_DCLDE_10,
+                  metrics_DCLDE_11],
+    model_labels=["DCLDE_01", "DCLDE_02","DCLDE_03","DCLDE_04",
+                  "DCLDE_05","DCLDE_06","DCLDE_07","DCLDE_08","DCLDE_09",
+                  "DCLDE_10", "DCLDE_11"],
+    target_class="TKW"
+)
+
+compare_pr_curves(
+    metrics_list=[metrics_DCLDE_01, metrics_DCLDE_02,metrics_DCLDE_03,
+                  metrics_DCLDE_04,metrics_DCLDE_05,metrics_DCLDE_06,
+                  metrics_DCLDE_07,metrics_DCLDE_08,
+                  metrics_DCLDE_09, metrics_DCLDE_10, metrics_DCLDE_11],
+    model_labels=["DCLDE_01", "DCLDE_02","DCLDE_03","DCLDE_04",
+                  "DCLDE_05","DCLDE_06","DCLDE_07","DCLDE_08","DCLDE_09",
+                  "DCLDE_10", "DCLDE_11"],
+    target_class="HW"
+)
+
+metrics_DCLDE_01['cm']
+metrics_DCLDE_02['cm']
+metrics_DCLDE_03['cm']
+metrics_DCLDE_04['cm']
+metrics_DCLDE_05['cm']
+metrics_DCLDE_06['cm']
+metrics_DCLDE_07['cm']
+metrics_DCLDE_08['cm']
+metrics_DCLDE_09['cm']
+metrics_DCLDE_10['cm']
+metrics_DCLDE_11['cm']
